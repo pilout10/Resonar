@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono simple de Resonar (nota musical). En una etapa posterior se reemplaza
+     por un adaptive icon real con capas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Fondo circular violeta -->
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M54,0a54,54 0 1,1 0,108a54,54 0 1,1 0,-108z" />
+
+    <!-- Nota musical blanca estilizada -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,30 L76,38 L76,64 A9,9 0 1,1 67,55.3 L67,45 L49,41 L49,68 A9,9 0 1,1 40,59.3 Z" />
+</vector>

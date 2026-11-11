@@ -1,0 +1,90 @@
+// Módulo principal de Resonar.
+//
+// Decisiones de versión:
+//  - minSdk 24: cubre la gran mayoría de Android ( requisito pedido ).
+//  - targetSdk 35: la versión estable más reciente (Android 15).
+//  - Java 17: bytecode de la app. AGP 9 aplica Kotlin solo; no hace falta el plugin kotlin.android.
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+android {
+    namespace = "com.resonar.app"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.resonar.app"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 2
+        versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        // NewPipeExtractor usa java.time y otras APIs modernas: en minSdk 24 hay
+        // que desugarizar (api-level 33+ las trae nativas).
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+}
+
+dependencies {
+    // ── AndroidX base ──────────────────────────────────────────────────
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
+    implementation("androidx.activity:activity-compose:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // ── Jetpack Compose + Material 3 ───────────────────────────────────
+    // El BOM fija versiones compatibles de todas las libs de Compose.
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // ── Media3: reproducción + sesión multimedia ───────────────────────
+    // exoplayer: motor de audio. session: servicio en segundo plano, notificación
+    // con controles, pantalla de bloqueo, reanudación. common: tipos base.
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-session:1.5.1")
+    implementation("androidx.media3:media3-common:1.5.1")
+
+    // ── Persistencia liviana de sesión ─────────────────────────────────
+    // SharedPreferences + JSON. Room entra en la Etapa 2 (caché de búsquedas con TTL);
+    // el estado del player acá alcanza y pesa nada.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // ── Carátulas con tamaño acotado ───────────────────────────────────
+    // Coil: decodifica al tamaño pedido (96–512 px), no al original. Es CLAVE
+    // para la RAM en el Motorola E15.
+    implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // ── YouTube vía NewPipeExtractor (ETAPA 2B) ────────────────────────
+    // Extrae búsqueda y streams de YouTube SIN YouTube API key. Es GPLv3:
+    // Resonar queda GPLv3 por usarla (nota en Ajustes). Llega por JitPack.
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
+
+    // Desugaring exigido por NewPipeExtractor con minSdk < 33.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+}

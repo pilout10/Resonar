@@ -1,0 +1,28 @@
+# Gradle / build
+.gradle/
+build/
+app/build/
+.kotlin/
+
+# Rutas locales de cada máquina (contienen el SDK de Android)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+captures/
+
+# Paquetes generados
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Respaldos locales (no van al repositorio)
+respaldos/
