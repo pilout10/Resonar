@@ -1,5 +1,6 @@
 package com.resonar.app.player
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.AudioAttributes
@@ -23,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Servicio de reproducción (ETAPA 0).
@@ -100,12 +102,27 @@ class MusicService : MediaSessionService() {
         // Se restaura PAUSADO: el usuario decide si sigue (o el sistema llama a onPlaybackResumption).
         store.loadState()?.let { saved ->
             if (saved.playlist.isNotEmpty()) {
-                player.setMediaItems(
-                    saved.playlist.map { savedToMediaItem(it) },
-                    saved.currentIndex.coerceIn(0, saved.playlist.lastIndex),
-                    saved.positionMs,
-                )
-                player.prepare()
+                // Poda de la cola guardada: puede traer canciones que ya no
+                // están (el usuario las borró, o cambió de carpeta de música).
+                // Sin esto, el reproductor intenta abrirlas y muestra
+                // "No se pudo abrir" en el mini reproductor.
+                val keptIndices = saved.playlist.indices.filter { existsLocally(saved.playlist[it].uri) }
+                val playlist = keptIndices.map { saved.playlist[it] }
+                if (playlist.isEmpty()) {
+                    Log.i("ResonarPlayer", "Cola guardada vacía tras la poda: no se restaura")
+                    store.savePlaylistJson(emptyList())
+                } else {
+                    val index = keptIndices.indexOf(saved.currentIndex).let { if (it >= 0) it else 0 }
+                    if (keptIndices.size != saved.playlist.size) {
+                        Log.i("ResonarPlayer", "Cola podada: ${saved.playlist.size} → ${playlist.size} temas")
+                    }
+                    player.setMediaItems(
+                        playlist.map { savedToMediaItem(it) },
+                        index,
+                        saved.positionMs,
+                    )
+                    player.prepare()
+                }
             }
         }
 
@@ -375,3 +392,33 @@ private fun savedToMediaItem(track: SavedTrack): MediaItem =
                 .build(),
         )
         .build()
+
+/**
+ * ¿Este tema sigue existiendo en el teléfono?
+ *
+ * Solo se comprueban los archivos LOCALES, que se verifican sin red:
+ *  - "file://…": el archivo en disco.
+ *  - "content://media/…": consulta a MediaStore (local, barata).
+ *  - Nube (Drive y compañía): NO se comprueba — verificarlo sería una llamada
+ *    de red al arrancar, y la app no debe depender de eso para arrancar.
+ */
+private fun Context.existsLocally(uri: String): Boolean {
+    val parsed = Uri.parse(uri)
+    return when (parsed.scheme) {
+        "file" -> parsed.path?.let { File(it).exists() } ?: false
+        "content" -> if (parsed.authority == "media") {
+            runCatching {
+                contentResolver.query(
+                    parsed,
+                    arrayOf(android.provider.MediaStore.Audio.Media._ID),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor -> cursor.moveToFirst() } == true
+            }.getOrDefault(true)
+        } else {
+            true // nube: no se verifica
+        }
+        else -> true
+    }
+}

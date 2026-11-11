@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -476,7 +477,7 @@ fun PermissionPrompt(onRequest: () -> Unit, onSettings: () -> Unit) {
 }
 
 @Composable
-fun EmptyLibrary(onRefresh: () -> Unit, onSettings: () -> Unit) {
+fun EmptyLibrary(onRefresh: () -> Unit, onSettings: () -> Unit, onSearchOnline: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -490,7 +491,10 @@ fun EmptyLibrary(onRefresh: () -> Unit, onSettings: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onRefresh, shape = RoundedCornerShape(50)) { Text("Actualizar biblioteca") }
+        // Salida: con la biblioteca vacía se puede buscar y descargar en línea.
+        Button(onClick = onSearchOnline, shape = RoundedCornerShape(50)) { Text("Buscar en línea") }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onRefresh) { Text("Actualizar biblioteca") }
         Spacer(Modifier.height(8.dp))
         Text(
             "Ajustes",

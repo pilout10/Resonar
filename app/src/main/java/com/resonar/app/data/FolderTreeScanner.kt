@@ -71,13 +71,12 @@ class FolderTreeScanner(private val app: Context) {
                     // Etiquetas reales solo en árboles LOCALES (disco): en Drive cada
                     // archivo se transmitiría por red. En remoto usamos la deriva de nombre.
                     val readTags = isLocalSafFolder(tree)
-                    val (tagTitle, tagArtist, tagAlbum) =
-                        if (readTags) readTagsSafe(uri) else Triple(null, null, null)
-                    val finalTitle = tagTitle?.takeIf { it.isNotBlank() } ?: title
-                    val finalArtist = tagArtist
+                    val tags = if (readTags) readTagsSafe(uri) else AudioTags()
+                    val finalTitle = tags.title?.takeIf { it.isNotBlank() } ?: title
+                    val finalArtist = tags.artist
                         ?.takeIf { it.isNotBlank() && !it.equals("<unknown>", ignoreCase = true) }
                         ?: artist
-                    val finalAlbum = tagAlbum?.takeIf { it.isNotBlank() } ?: albumName
+                    val finalAlbum = tags.album?.takeIf { it.isNotBlank() } ?: albumName
                     out.add(
                         LocalTrack(
                             id = stableId(childId),
@@ -87,7 +86,7 @@ class FolderTreeScanner(private val app: Context) {
                             album = finalAlbum,
                             albumId = 0L,
                             artistId = albumName.hashCode().toLong(),
-                            durationMs = 0L,
+                            durationMs = tags.durationMs,
                             trackNo = 0,
                             folder = albumName,
                             fileName = fileLabel,
@@ -114,23 +113,29 @@ class FolderTreeScanner(private val app: Context) {
 
     /**
      * Lee las etiquetas del audio SIN decodificar audio: MediaMetadataRetriever nativo.
-     * Si no hay tags (nuestras descargas), si el formato no se entiende, o si Drive
-     * rechaza/no responde, devuelve (null, null, null) y se usa el nombre de archivo.
+     * Si no hay tags (nuestras descargas), si el formato no se entiende, o si el
+     * proveedor falla, devuelve todo vacío y se usa el nombre de archivo.
+     * También trae la DURACIÓN: en carpetas locales se lee del mismo archivo, así
+     * que las canciones muestran su tiempo real en vez de 0:00.
      */
-    private fun readTagsSafe(uri: Uri): Triple<String?, String?, String?> {
+    private fun readTagsSafe(uri: Uri): AudioTags {
         val retriever = android.media.MediaMetadataRetriever()
         return try {
             app.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 retriever.setDataSource(pfd.fileDescriptor)
-                val title = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
-                val artist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                val album = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
-                Triple(title, artist, album)
-            } ?: Triple(null, null, null)
+                AudioTags(
+                    title = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE),
+                    artist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                    album = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                    durationMs = retriever.extractMetadata(
+                        android.media.MediaMetadataRetriever.METADATA_KEY_DURATION,
+                    )?.toLongOrNull()?.takeIf { it > 0 } ?: 0L,
+                )
+            } ?: AudioTags()
         } catch (e: Exception) {
-            // No es un error: archivos sin tag / formatos raros / Drive lento → fallback al nombre.
+            // No es un error: archivos sin tag / formatos raros / proveedor lento → fallback al nombre.
             Log.d(TAG, "Sin tags legibles: ${e.message}")
-            Triple(null, null, null)
+            AudioTags()
         } finally {
             runCatching { retriever.release() }
         }
@@ -222,3 +227,11 @@ class FolderTreeScanner(private val app: Context) {
         val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "ogg", "opus", "wav", "wma", "alac", "aiff", "aif")
     }
 }
+
+/** Etiquetas leídas del archivo (todo vacío si el archivo no las tiene). */
+private data class AudioTags(
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val durationMs: Long = 0L,
+)

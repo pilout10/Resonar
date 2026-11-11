@@ -211,8 +211,6 @@ private fun MainContent(
         )
         when {
             !library.hasPermission -> PermissionPrompt(viewModel::requestPermissions, viewModel::openSettings)
-            !library.scannedOnce && library.loading -> ScanningLibrary()
-            library.scannedOnce && library.tracks.isEmpty() -> EmptyLibrary(viewModel::refreshLibrary, viewModel::openSettings)
             else -> {
                 AnimatedContent(
                     targetState = tab,
@@ -224,7 +222,10 @@ private fun MainContent(
                     label = "pestanas",
                 ) { destination ->
                     when (destination) {
-                        MainTab.Home -> HomeTab(viewModel, wide)
+                        // "Sin música" SOLO tapa Inicio. Las demás pestañas siempre
+                        // sirven: buscar en línea, ver la biblioteca o las playlists
+                        // tienen que funcionar aunque la carpeta esté vacía.
+                        MainTab.Home -> HomeContent(viewModel, wide, library)
                         MainTab.Search -> SearchTab(viewModel, wide)
                         MainTab.Library -> LibraryTab(viewModel, wide)
                         MainTab.Playlists -> PlaylistsTab(viewModel)
@@ -239,6 +240,32 @@ private fun MainContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * Inicio: escaneando, biblioteca vacía o el panel de siempre.
+ * El aviso de "sin música" vive acá y no en el contenedor de las pestañas:
+ * si no, dejaba al usuario encerrado sin poder ir a Buscar.
+ */
+@Composable
+private fun HomeContent(
+    viewModel: ResonarViewModel,
+    wide: Boolean,
+    library: com.resonar.app.data.LibraryState,
+) {
+    when {
+        !library.scannedOnce && library.loading -> ScanningLibrary()
+        library.scannedOnce && library.tracks.isEmpty() ->
+            EmptyLibrary(
+                onRefresh = viewModel::refreshLibrary,
+                onSettings = viewModel::openSettings,
+                onSearchOnline = {
+                    viewModel.setSearchMode(1)
+                    viewModel.openTab(MainTab.Search)
+                },
+            )
+        else -> HomeTab(viewModel, wide)
     }
 }
 
