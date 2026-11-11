@@ -16,6 +16,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.resonar.app.data.TrackNames
 import com.resonar.app.online.OnlineCatalog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +118,7 @@ class MusicService : MediaSessionService() {
                         Log.i("ResonarPlayer", "Cola podada: ${saved.playlist.size} → ${playlist.size} temas")
                     }
                     player.setMediaItems(
-                        playlist.map { savedToMediaItem(it) },
+                        playlist.map { cleanSavedTrack(it) }.map { savedToMediaItem(it) },
                         index,
                         saved.positionMs,
                     )
@@ -379,7 +380,9 @@ class MusicService : MediaSessionService() {
     }
 }
 
-/** Track guardado -> MediaItem para reanudar (misma cola, misma metadata). */
+/**
+ * Track guardado -> MediaItem para reanudar (misma cola, misma metadata).
+ */
 private fun savedToMediaItem(track: SavedTrack): MediaItem =
     MediaItem.Builder()
         .setMediaId(track.mediaId)
@@ -421,4 +424,20 @@ private fun Context.existsLocally(uri: String): Boolean {
         }
         else -> true
     }
+}
+
+/**
+ * Limpia el título de una canción guardada: si es una descarga de Resonar, el
+ * título guardado puede traer el sufijo interno ("… [youtube_xxxx]") y el
+ * formato "Artista - Título". Se separa para que el mini reproductor muestre
+ * el nombre bien, sin lo que es bookkeeping interno.
+ */
+private fun cleanSavedTrack(track: SavedTrack): SavedTrack {
+    if (!TrackNames.isOwnDownload(track.title)) return track
+    val (artist, title) = TrackNames.splitArtistTitle(TrackNames.stripMarker(track.title))
+    return track.copy(
+        title = title?.takeIf { it.isNotBlank() }
+            ?: TrackNames.stripMarker(track.title).ifBlank { track.title },
+        artist = artist?.takeIf { it.isNotBlank() } ?: track.artist,
+    )
 }

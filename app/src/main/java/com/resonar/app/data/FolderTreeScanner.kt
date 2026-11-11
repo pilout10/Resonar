@@ -48,10 +48,9 @@ class FolderTreeScanner(private val app: Context) {
                     // o "Tema - Artista.ext" (biblioteca típica de tu carpeta, como tu Drive):
                     // el sufijo interno marca nuestras descargas; los demás nombres se
                     // separan a la inversa porque TU biblioteca usa "Tema - Artista".
-                    val ownMarker = Regex("""\s*\[[a-z]+_[A-Za-z0-9]{6,}\]$""")
                     val baseLabel = fileLabel.substringBeforeLast('.')
-                    val isOwnDownload = ownMarker.containsMatchIn(baseLabel)
-                    val pretty = baseLabel.replace(ownMarker, "").trim()
+                    val isOwnDownload = TrackNames.isOwnDownload(baseLabel)
+                    val pretty = TrackNames.stripMarker(baseLabel)
                     val splitAt = pretty.indexOf(" - ")
                     val title: String
                     val artist: String

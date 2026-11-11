@@ -328,8 +328,22 @@ class LocalLibraryRepository(
                 val tagAlbum = cursor.getString(colAlbum).takeUnless { it.isNullOrBlank() } ?: ""
 
                 val fileArtist = deriveArtistFromFileName(fileName)
-                val title = tagTitle.ifBlank { deriveTitleFromFileName(fileName) }
-                val artist = tagArtist.ifBlank { fileArtist ?: "<Sin artista>" }
+                // El título que trae el sistema puede ser el nombre del archivo (Android
+                // lo inventa cuando el audio no tiene tags). Para nuestras descargas eso
+                // arrastra el sufijo interno "[youtube_xxxx]": hay que sacarlo y separar
+                // bien "Artista - Título".
+                val ownDownload = TrackNames.isOwnDownload(fileName)
+                val rawTitle = tagTitle.ifBlank { deriveTitleFromFileName(fileName) }
+                val title: String
+                val artist: String
+                if (ownDownload) {
+                    val (ownArtist, ownTitle) = TrackNames.splitArtistTitle(TrackNames.stripMarker(rawTitle))
+                    title = ownTitle.ifBlank { TrackNames.stripMarker(rawTitle) }
+                    artist = tagArtist.ifBlank { ownArtist ?: "<Sin artista>" }
+                } else {
+                    title = TrackNames.stripMarker(rawTitle)
+                    artist = tagArtist.ifBlank { fileArtist ?: "<Sin artista>" }
+                }
                 val album = tagAlbum.ifBlank { folder.ifBlank { "<Sin álbum>" } }
                 val genre = cleanGenre(genres[id])
 
@@ -447,7 +461,7 @@ class LocalLibraryRepository(
     }
 
     private fun deriveTitleFromFileName(fileName: String): String {
-        var s = fileName.substringBeforeLast('.')
+        var s = TrackNames.stripMarker(fileName.substringBeforeLast('.'))
         // Sufijo de pista: "01", "01.", "01 -", "01_"
         s = s.replaceFirst(Regex("""^\d{1,3}[\s._-]+"""), "")
         // Formato "Artista - Título": el título es lo de después
@@ -457,7 +471,8 @@ class LocalLibraryRepository(
     }
 
     private fun deriveArtistFromFileName(fileName: String): String? {
-        val s = fileName.substringBeforeLast('.').replaceFirst(Regex("""^\d{1,3}[\s._-]+"""), "")
+        val s = TrackNames.stripMarker(fileName.substringBeforeLast('.'))
+            .replaceFirst(Regex("""^\d{1,3}[\s._-]+"""), "")
         val idx = s.indexOf(" - ")
         return if (idx > 0 && idx < s.length - 3) s.take(idx).trim() else null
     }
