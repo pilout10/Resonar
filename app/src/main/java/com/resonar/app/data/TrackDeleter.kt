@@ -80,6 +80,10 @@ class TrackDeleter(
         syncer.deleteDownloadedCopy(track)
         StreamCacheHolder.remove(app, track.uri)
         user.removeEverywhere(track.id)
+        // Si el tema era una descarga de Resonar, se saca su registro del índice:
+        // el archivo ya no está, así que en el buscador tiene que volver a salir
+        // el botón de descarga (si no, queda marcado como "descargado" para siempre).
+        downloads.entryByFileName(track.fileName)?.let { downloads.forgetDownload(it.mediaId) }
         Log.i("ResonarDelete", "Limpieza completa de: ${track.title}")
     }
 

@@ -109,6 +109,8 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
 
     /** El tema en tránsito para el borrado vía sistema (se limpia cuando confirma). */
     private var systemDeleteTarget: LocalTrack? = null
+    /** Id de la descarga online del tema que se está borrando (si es una). */
+    private var systemDeleteOnlineId: String? = null
 
     // ── Búsqueda federada en línea (2A: Audius + Internet Archive) ───────
 
@@ -256,7 +258,8 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 downloader.download(track, resolve = { online.resolveStream(it) }) { percent ->
                     _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(percent = percent))
                 }
-                _downloadedIds.value = _downloadedIds.value + id
+                // El índice ya tiene la entrada: se recalcula desde ahí (es la verdad).
+                _downloadedIds.value = container.onlineDownloader.downloadedIds()
                 _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(done = true))
                 // La descarga es parte de "Tu música": refrescar la biblioteca.
                 container.libraryRepository.refresh()
@@ -505,6 +508,8 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                     listOf(Uri.parse(track.uri)),
                 )
                 systemDeleteTarget = track
+                // El id de la descarga online se pierde al borrar: lo capturo ANTES.
+                systemDeleteOnlineId = container.onlineDownloader.entryByFileName(track.fileName)?.mediaId
                 _systemDeleteRequest.value = IntentSenderRequest.Builder(pi.intentSender).build()
             }.onFailure {
                 Toast.makeText(getApplication(), "No se pudo iniciar el borrado", Toast.LENGTH_LONG).show()
@@ -543,7 +548,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 _downloadedIds.value = _downloadedIds.value - onlineDownloadId
                 _onlineDownloads.value = _onlineDownloads.value - onlineDownloadId
             }
-            finishDelete(track)
+            finishDelete(track, onlineDownloadId)
         }
     }
 
@@ -551,15 +556,24 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     fun onSystemDeleteResult(deleted: Boolean) {
         _systemDeleteRequest.value = null
         val track = systemDeleteTarget
+        val onlineId = systemDeleteOnlineId
         systemDeleteTarget = null
+        systemDeleteOnlineId = null
         if (!deleted) return
-        vmScope.launch { finishDelete(track ?: return@launch) }
+        if (onlineId != null) {
+            _downloadedIds.value = _downloadedIds.value - onlineId
+            _onlineDownloads.value = _onlineDownloads.value - onlineId
+        }
+        vmScope.launch { finishDelete(track ?: return@launch, onlineId) }
     }
 
     /** Pasos comunes de limpieza una vez que el archivo original ya no está. */
-    private suspend fun finishDelete(track: LocalTrack) {
+    private suspend fun finishDelete(track: LocalTrack, onlineMediaId: String? = null) {
         container.trackDeleter.cleanAppSide(track)
-        container.playerConnection.removeTrackById(track.id)
+        container.playerConnection.removeTrackById(track.id, track.uri, onlineMediaId)
+        // El índice de descargas es la verdad: si el archivo ya no está, el tema
+        // tiene que volver a ser descargable desde el buscador.
+        _downloadedIds.value = container.onlineDownloader.downloadedIds()
         container.trackDeleter.rescan()
     }
     fun setDataSaver(enabled: Boolean) = playback.setDataSaver(enabled)

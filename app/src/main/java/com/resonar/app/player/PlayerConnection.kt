@@ -280,17 +280,31 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
     /**
      * Borrado limpio: si el tema eliminado estaba sonando o esperando en la
      * cola, se saca de ahí (y el cambio de cola re-graba la sesión sola).
+     *
+     * Se busca por id, por URI y por id de descarga online: un tema puede
+     * entrar en la cola con el id de MediaStore y borrarse con el id de la
+     * carpeta (o al revés), y si no coincidieran el tema borrado seguiría
+     * sonando o esperando en la cola.
      */
-    fun removeTrackById(trackId: Long) {
+    fun removeTrackById(trackId: Long, uri: String? = null, onlineMediaId: String? = null) {
         val c = controller ?: return
         val mediaId = "local:$trackId"
-        for (index in 0 until c.mediaItemCount) {
-            if (c.getMediaItemAt(index).mediaId == mediaId) {
-                if (c.mediaItemCount <= 1) c.clearMediaItems() else c.removeMediaItem(index)
-                syncFull(c)
-                return
+        var changed = false
+        for (index in c.mediaItemCount - 1 downTo 0) {
+            val item = c.getMediaItemAt(index)
+            val sameUri = uri != null && item.localConfiguration?.uri?.toString() == uri
+            val sameOnline = onlineMediaId != null && item.mediaId == onlineMediaId
+            if (item.mediaId == mediaId || sameUri || sameOnline) {
+                if (c.mediaItemCount <= 1) {
+                    c.clearMediaItems()
+                    changed = true
+                    break
+                }
+                c.removeMediaItem(index)
+                changed = true
             }
         }
+        if (changed) syncFull(c)
     }
 
     /** Saca de la fila lo que ya sonó, y deja la canción actual en el puesto 0. */

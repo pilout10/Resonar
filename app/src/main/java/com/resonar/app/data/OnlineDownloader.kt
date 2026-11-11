@@ -81,6 +81,36 @@ class OnlineDownloader(private val app: Context) {
     @Volatile
     private var index: List<Entry> = loadIndex()
 
+    /**
+     * Al arrancar: se purgan las entradas cuyo archivo ya no está. Si el usuario
+     * borró el tema (o el sistema lo borró), el registro quedó huérfano y el
+     * buscador lo seguía marcando como "descargado" sin dejar volver a bajarlo.
+     */
+    init {
+        val alive = index.filter { entry ->
+            when {
+                entry.treeUri == null -> {
+                    // Copia privada de la app: se comprueba el archivo en disco.
+                    val file = File(dir, entry.fileName)
+                    file.exists() && file.length() > 1024
+                }
+                else -> {
+                    val uri = Uri.parse(entry.treeUri)
+                    // Árbol LOCAL: se comprueba al instante, sin red.
+                    // Nube (Drive): comprobarlo sería una llamada de red al arrancar,
+                    // así que se deja pasar; se corrige al tocar "Descargar"
+                    // (documentExists) y al borrar.
+                    if (!MusicPlaces.isLocalSaf(uri.authority)) true else documentExists(uri)
+                }
+            }
+        }
+        if (alive.size != index.size) {
+            Log.i("ResonarDown", "Índice purgado: ${index.size - alive.size} descarga(s) sin archivo")
+            index = alive
+            persist()
+        }
+    }
+
     /** Un archivo por vez: el descargador automático y este comparten red/disco. */
     private val mutex = Mutex()
 
@@ -95,7 +125,8 @@ class OnlineDownloader(private val app: Context) {
     fun fileForEntry(entry: Entry): File = File(dir, entry.fileName)
 
     /** Entrada por nombre de archivo (la biblioteca solo guarda el nombre). */
-    fun entryByFileName(name: String): Entry? = index.firstOrNull { it.fileName == name }
+    fun entryByFileName(name: String): Entry? =
+        index.firstOrNull { it.fileName.equals(name, ignoreCase = true) }
 
     /** ¿Carpeta elegida? Si sí, las descargas van ahí; si no, a la carpeta privada. */
     fun usingDriveFolder(): Boolean = folderStore.uri() != null
@@ -120,9 +151,49 @@ class OnlineDownloader(private val app: Context) {
 
     fun localUriFor(track: OnlineTrack): Uri? {
         val entry = index.firstOrNull { it.mediaId == track.mediaId } ?: return null
-        entry.treeUri?.let { return Uri.parse(it) } // el árbol SAF ya lo cubre
+        entry.treeUri?.let { treeUri ->
+            val uri = Uri.parse(treeUri)
+            // El documento puede haber sido borrado (desde el sistema o desde Drive):
+            // si ya no está, el tema NO está descargado y hay que volver a bajarlo.
+            return if (documentExists(uri)) uri else null
+        }
         val file = File(dir, entry.fileName)
         return if (file.exists() && file.length() > 1024) Uri.fromFile(file) else null
+    }
+
+    /**
+     * ¿El documento SAF sigue existiendo?
+     *
+     * - Árbol LOCAL: se comprueba el archivo en disco (instantáneo y sin red).
+     * - Nube (Drive): una consulta al proveedor. Si el proveedor falla por red se
+     *   asume que el archivo sigue (preferimos no duplicar descargas).
+     */
+    private fun documentExists(uri: Uri): Boolean {
+        localFileFor(uri)?.let { return it.exists() }
+        return try {
+            app.contentResolver.query(
+                uri,
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null,
+                null,
+                null,
+            )?.use { cursor -> cursor.moveToFirst() } == true
+        } catch (e: java.io.FileNotFoundException) {
+            false // el documento ya no está
+        } catch (e: Exception) {
+            true // error del proveedor: se supone que el archivo sigue
+        }
+    }
+
+    /**
+     * Archivo en disco de un documento del almacenamiento interno ("primary:carpeta/x.mp3").
+     * null si no es de ese proveedor (o sea, si es Drive u otra nube).
+     */
+    private fun localFileFor(uri: Uri): File? {
+        if (uri.authority != "com.android.externalstorage.documents") return null
+        val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull() ?: return null
+        if (!docId.startsWith("primary:")) return null
+        return File("/storage/emulated/0", docId.removePrefix("primary:"))
     }
 
     // ── Descarga ───────────────────────────────────────────────────────────
@@ -355,6 +426,20 @@ class OnlineDownloader(private val app: Context) {
         } else {
             null
         }
+    }
+
+    /**
+     * Saca una entrada del índice SIN tocar el archivo.
+     * Para cuando el archivo YA fue borrado (por el sistema o por Drive) y solo
+     * queda el registro: si no, el tema seguiría apareciendo como "descargado"
+     * en el buscador y no se podría volver a bajar.
+     */
+    fun forgetDownload(mediaId: String): Boolean {
+        val entry = index.firstOrNull { it.mediaId == mediaId } ?: return false
+        index = index.filter { it.mediaId != mediaId }
+        persist()
+        Log.i("ResonarDown", "Registro de descarga olvidado: ${entry.title}")
+        return true
     }
 
     private fun addToIndex(entry: Entry) {
