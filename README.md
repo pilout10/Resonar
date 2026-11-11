@@ -30,16 +30,18 @@ Si algo externo se rompe (sobre todo YouTube), el procedimiento está en
 
 ## Qué NO hace todavía (honestidad)
 
-- Las **carátulas** de temas que viven en Drive: Drive no expone la carátula y la
-  app no abre cada archivo a buscar la etiqueta embebida (sería lentísimo por red).
-  Las carpetas locales sí leen las etiquetas del audio.
+- Las **carátulas** de los archivos que no las traen de origen: si el mp3 no tiene
+  una imagen embebida y la carpeta no tiene un `cover.jpg`/`folder.jpg` al lado,
+  se muestra la nota musical (es lo único que hay para dibujar). Las descargas
+  en línea sí muestran la portada de la fuente (YouTube, Audius) y las carpetas
+  locales leen la carátula de carpeta, que es el estándar de la industria.
 - Los **nombres** se parten como `Tema - Artista`. Un archivo llamado
   `Artista - Tema` se muestra invertido, salvo los descargados por Resonar
   (llevan la marca `[fuente_id]`).
 - **YouTube** puede dejar de funcionar de un día a otro (cambios del sitio,
   verificaciones anti-bot). No es un bug de la app; Audius e Internet Archive
   no dependen de ese servicio.
-- La app **no tiene historial de versiones**: no hay Git instalado en la máquina
+- La app **no tiene historial de versiones published**: no hay Git instalado en la máquina
   donde se desarrolla. Hay respaldos en `../respaldos/` y un `.gitignore` listo
   para cuando se instale.
 
@@ -116,3 +118,7 @@ Resonar/
   no tiene que volver lento el streaming.
 - **Carpeta local ≠ nube**: una carpeta elegida en el propio teléfono no se copia
   ni se cachea; ya está en disco.
+- **Carátulas en tres niveles**: la de la fuente en línea (si la hay), la de la
+  carpeta (`cover.jpg` al lado de los temas) y la de MediaStore (imagen embebida).
+- **Escaneo en una sola pasada por carpeta**: el proveedor de archivos no repone
+  el cursor, así que recorrerlo dos veces perdía archivos.

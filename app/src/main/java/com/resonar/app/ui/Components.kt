@@ -236,7 +236,9 @@ fun TrackRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TrackArt(
-                model = if (track.albumId > 0L) albumArtUri(track.albumId) else null,
+                // La portada de la fuente en línea (si la hay) tiene prioridad:
+                // las descargas de YouTube traen la URL de la imagen y así se ven.
+                model = track.artUrl ?: if (track.albumId > 0L) albumArtUri(track.albumId) else null,
                 size = 52.dp,
                 corner = 12.dp,
                 maxDecodePx = artPx,

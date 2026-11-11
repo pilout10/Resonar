@@ -42,6 +42,11 @@ data class LocalTrack(
     val searchBlob: String,
     /** true si es una descarga online (YouTube/IA/Audius) guardada en la app. */
     val fromDownloads: Boolean = false,
+    /**
+     * Carátula por URL (la de la fuente en línea: YouTube, Audius…). null si no la
+     * hay. Es lo que permite mostrar la portada de una descarga sin tocar el disco.
+     */
+    val artUrl: String? = null,
 )
 
 /** Un artista con sus datos para la pestaña de artistas. */
@@ -215,6 +220,7 @@ class LocalLibraryRepository(
             genre = "",
             searchBlob = normalizeForSearch("$title $artist ${file.name} Descargas"),
             fromDownloads = true,
+            artUrl = entry.artUrl,
         )
     }
 
@@ -382,9 +388,20 @@ class LocalLibraryRepository(
             return if (chosen.isNotEmpty()) result else emptyList()
         }
         val byName = result.associateBy { it.fileName.lowercase() }
+        // Las descargas que caen en la carpeta elegida (Drive o local) las ve el
+        // escáner de la carpeta, pero la PORTADA la tenemos en el índice de
+        // descargas (la URL de la fuente): se la pegamos acá.
+        val artByFile = downloads?.allEntries().orEmpty()
+            .mapNotNull { entry -> entry.artUrl?.let { entry.fileName.lowercase() to it } }
+            .toMap()
         return fromTree.map { item ->
             val known = byName[item.fileName.lowercase()]
-            if (known != null) known.copy(sourceRank = 0) else item
+            val base = if (known != null) known.copy(sourceRank = 0) else item
+            // Prioridad: portada de la fuente en línea > carátula de carpeta > MediaStore.
+            val art = base.artUrl
+                ?: artByFile[item.fileName.lowercase()]
+                ?: item.artUrl
+            if (art != null) base.copy(artUrl = art) else base
         }.sortedBy { it.title.lowercase() }
     }
 

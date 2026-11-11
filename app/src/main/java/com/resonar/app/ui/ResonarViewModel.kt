@@ -614,7 +614,10 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun LocalTrack.toMediaItem(): MediaItem {
-        val artUri: Uri? = if (albumId > 0) albumArtUri(albumId) else null
+        // La carátula: la URL de la fuente en línea si la hay (descargas de
+        // YouTube), si no la de MediaStore (álbum del teléfono).
+        val artUri: Uri? = artUrl?.let { Uri.parse(it) }
+            ?: if (albumId > 0) albumArtUri(albumId) else null
         // Si el tema de nube ya fue descargado al teléfono, tocar la copia local:
         // arranca al toque y sin internet. Si no, su URI original (Drive la baja).
         val playUri = container.librarySyncer.localUriFor(this) ?: Uri.parse(uri)

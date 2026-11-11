@@ -31,11 +31,33 @@ class FolderTreeScanner(private val app: Context) {
                 val nameCol = rows.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val mimeCol = rows.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
                 if (idCol < 0 || nameCol < 0) return@use
-                while (rows.moveToNext() && out.size < MAX_TRACKS) {
-                    val childId = rows.getString(idCol) ?: continue
+
+                // UNA sola pasada: se listan los hijos en memoria y se usan dos
+                // veces (carátula de la carpeta y audios). No se vuelve a recorrer
+                // el cursor: algunos proveedores no lo reponen y se perdían los
+                // archivos de la carpeta.
+                val entries = ArrayList<Entry>(32)
+                while (rows.moveToNext() && entries.size < MAX_ENTRIES) {
+                    val id = rows.getString(idCol) ?: continue
                     val name = rows.getString(nameCol).orEmpty()
                     val mime = if (mimeCol >= 0) rows.getString(mimeCol).orEmpty() else ""
-                    if (isDirectory(mime)) {
+                    entries.add(Entry(id, name, mime))
+                }
+
+                // Carátula de la carpeta: es el estándar de la industria (cover.jpg,
+                // folder.jpg, front.jpg al lado de los temas). Sale del MISMO listado,
+                // así que no cuesta nada (ni una consulta extra).
+                val folderArtId = entries.firstOrNull { !isDirectory(it.mime) && isFolderArt(it.name, it.mime) }?.id
+                val folderArtUri = folderArtId?.let {
+                    DocumentsContract.buildDocumentUriUsingTree(tree, it).toString()
+                }
+
+                for (entry in entries) {
+                    if (out.size >= MAX_TRACKS) break
+                    val childId = entry.id
+                    val name = entry.name
+                    val mime = entry.mime
+                    if (isDirectoryEntry(tree, childId, name, mime)) {
                         if (depth < MAX_DEPTH && !name.startsWith(".")) stack.add(childId to depth + 1)
                         continue
                     }
@@ -93,6 +115,7 @@ class FolderTreeScanner(private val app: Context) {
                             year = 0,
                             genre = "",
                             searchBlob = LocalLibraryRepository.normalizeForSearch("$finalTitle $finalArtist $finalAlbum $name"),
+                            artUrl = folderArtUri,
                         ),
                     )
                 }
@@ -188,6 +211,30 @@ class FolderTreeScanner(private val app: Context) {
     }
 
     /**
+     * ¿Es esta entrada una carpeta?
+     *
+     * El proveedor de Drive devuelve la columna de tipo, pero el del almacenamiento
+     * interno del Android NO la devuelve en las consultas por árbol: ahí el tipo
+     * viene vacío y, si se lo toma literal, NUNCA se entra a una subcarpeta (y el
+     * escaneo se queda solo con la primera carpeta). Cuando falta el tipo, se
+     * pregunta al proveedor: si el documento tiene hijos, es una carpeta.
+     */
+    private fun isDirectoryEntry(tree: Uri, childId: String, name: String, mime: String): Boolean {
+        if (mime.isNotBlank()) return isDirectory(mime)
+        // Sin tipo: un nombre con extensión es un archivo; sin extensión, se pregunta.
+        if (name.contains('.')) return false
+        return runCatching {
+            app.contentResolver.query(
+                DocumentsContract.buildChildDocumentsUriUsingTree(tree, childId),
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null,
+                null,
+                null,
+            )?.use { true } ?: false
+        }.getOrDefault(false)
+    }
+
+    /**
      * FLAC en Drive suele llegar como audio/flac, application/x-flac o solo con la extensión.
      * No alcanza con confiar en MediaStore: muchos no quedan marcados como música.
      */
@@ -223,7 +270,23 @@ class FolderTreeScanner(private val app: Context) {
         const val TAG = "ResonarFolder"
         const val MAX_TRACKS = 1500
         const val MAX_DEPTH = 8
+        /** Tope de hijos leídos por carpeta (para no inflar la RAM con una lista gigante). */
+        const val MAX_ENTRIES = 4000
         val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "ogg", "opus", "wav", "wma", "alac", "aiff", "aif")
+
+        /** Nombres que la industria usa para la carátula de una carpeta. */
+        val FOLDER_ART_NAMES = setOf(
+            "cover", "folder", "front", "album", "albumart", "albumartsmall", "thumb", "artwork",
+        )
+        val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp", "bmp")
+
+        /** ¿Este archivo de la carpeta es la carátula? */
+        fun isFolderArt(name: String, mime: String): Boolean {
+            val ext = name.substringAfterLast('.', "").lowercase()
+            if (mime.startsWith("image/")) return FOLDER_ART_NAMES.contains(name.substringBeforeLast('.').trim().lowercase())
+            if (!IMAGE_EXT.contains(ext)) return false
+            return FOLDER_ART_NAMES.contains(name.substringBeforeLast('.').trim().lowercase())
+        }
     }
 }
 
@@ -234,3 +297,6 @@ private data class AudioTags(
     val album: String? = null,
     val durationMs: Long = 0L,
 )
+
+/** Un hijo de una carpeta (documento del árbol SAF). */
+private data class Entry(val id: String, val name: String, val mime: String)

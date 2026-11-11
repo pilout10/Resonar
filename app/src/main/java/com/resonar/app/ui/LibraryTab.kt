@@ -206,7 +206,7 @@ fun PlaylistsPage(viewModel: ResonarViewModel) {
                 count = playlist.trackIds.count { byId[it] != null },
                 colors = playlistColors[absHash(playlist.id) % playlistColors.size],
                 icon = R.drawable.ic_playlists,
-                art = first?.let { albumArtUri(it.albumId) },
+                art = first?.let { it.artUrl ?: if (it.albumId > 0L) albumArtUri(it.albumId) else null },
                 artPx = artPx,
                 onClick = { viewModel.openCollection(playlist.id) },
                 onPlay = { viewModel.playCollection(playlist.id) },

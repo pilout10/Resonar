@@ -199,7 +199,12 @@ fun HomeTab(viewModel: ResonarViewModel, wide: Boolean) {
                                         viewModel.playTracks(recent, recent.indexOf(track).coerceAtLeast(0))
                                     },
                             ) {
-                                TrackArt(albumArtUri(track.albumId), cardWidth, 16.dp, artPx)
+                                TrackArt(
+                                    track.artUrl ?: if (track.albumId > 0L) albumArtUri(track.albumId) else null,
+                                    cardWidth,
+                                    16.dp,
+                                    artPx,
+                                )
                                 Spacer(Modifier.height(8.dp))
                                 Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                                 Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
