@@ -69,6 +69,34 @@ class OpenverseSource : MusicSource {
         return StreamHandle(Uri.parse(url), null)
     }
 
+    /**
+     * Pegado de URL: openverse.org/audio/{id} → la API oficial del mismo id.
+     */
+    suspend fun resolveUrl(url: String): OnlineTrack? {
+        val id = Uri.parse(url).pathSegments?.lastOrNull { it.isNotBlank() && it != "audio" }
+            ?: return null
+        val json = Http.getJson("https://api.openverse.org/v1/audio/$id/")
+        val title = json.optString("title").trim()
+        val audio = json.optString("url").trim()
+        if (title.isBlank() || !audio.startsWith("http")) return null
+        return OnlineTrack(
+            sourceId = id,
+            externalId = audio,
+            title = title,
+            artist = json.optString("creator").trim().ifBlank { "Openverse" },
+            durationMs = if (json.has("duration")) json.optLong("duration").takeIf { it > 0 } else null,
+            artUrl = json.optString("thumbnail").takeIf { it.startsWith("http") },
+            license = licenseLabel(json.optString("license")),
+            providerLabel = json.optString("provider").takeIf { it.isNotBlank() },
+        )
+    }
+
+    /** ¿Esta URL es de Openverse? */
+    fun canResolveUrl(url: String): Boolean {
+        val host = Uri.parse(url).host?.lowercase().orEmpty()
+        return host.contains("openverse.org") && Uri.parse(url).pathSegments?.contains("audio") == true
+    }
+
     /** "by" → "CC BY", "cc0" → "CC0"… (lo que la fuente declara, sin inventar). */
     private fun licenseLabel(code: String): String? = when (code.lowercase()) {
         "by" -> "CC BY"

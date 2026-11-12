@@ -174,6 +174,16 @@ fun AppShell(viewModel: ResonarViewModel) {
             )
         }
 
+        // Hoja de calidades: solo aparece si la fuente ofrece más de una.
+        val qualitySheet by viewModel.qualitySheet.collectAsState()
+        if (qualitySheet != null) {
+            OnlineQualitySheet(
+                choice = qualitySheet!!,
+                onPick = { viewModel.downloadWithQuality(qualitySheet!!.track, it) },
+                onDismiss = viewModel::closeQualitySheet,
+            )
+        }
+
         // Fuera de la animación de Configuración: ahí el botón sí recibe el toque.
         val showLanguageNote by viewModel.showLanguageNote.collectAsState()
         if (showLanguageNote) {
@@ -181,6 +191,7 @@ fun AppShell(viewModel: ResonarViewModel) {
         }
 
         when {
+            qualitySheet != null -> BackHandler { viewModel.closeQualitySheet() }
             versionSheet != null -> BackHandler { viewModel.closeVersionSheet() }
             pendingDelete != null -> BackHandler { viewModel.cancelDelete() }
             showLanguageNote -> BackHandler { viewModel.closeLanguageNote() }

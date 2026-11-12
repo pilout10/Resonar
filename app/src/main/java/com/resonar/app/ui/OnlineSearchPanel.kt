@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.resonar.app.R
+import com.resonar.app.online.AudioOption
 import com.resonar.app.online.OnlineResult
 import com.resonar.app.player.PlaybackUiState
 import com.resonar.app.online.OnlineRepository
@@ -397,12 +398,117 @@ fun OnlineVersionSheet(
     }
 }
 
+/**
+ * HOJA DE CALIDADES: qué calidades ofrece REALMENTE la fuente de ese tema
+ * (formato, bitrate y tamaño aproximado cuando la fuente los dice). Solo se
+ * listan las que existen de verdad: nada de inventar un "MP3 320" que la
+ * fuente no tiene.
+ *
+ * Se dibuja como overlay a nivel AppShell (mismo patrón que la hoja de
+ * versiones: los diálogos de Material no reciben el toque en el Motorola).
+ */
+@Composable
+fun OnlineQualitySheet(
+    choice: ResonarViewModel.QualityChoice,
+    onPick: (AudioOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        ScrimOverlay(onDismiss)
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                Text(
+                    choice.track.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Elegí la calidad. Solo se muestran las que ofrece ${sourceLabel(choice.track.sourceId)}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                )
+                choice.options.take(MAX_QUALITIES).forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onPick(option) }
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_download),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(option.label, fontWeight = FontWeight.SemiBold)
+                            val detail = buildString {
+                                if (!option.bitrate.isNullOrBlank()) append(option.bitrate)
+                                if (option.approxBytes != null && option.approxBytes > 0) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(formatSize(option.approxBytes))
+                                }
+                            }
+                            if (detail.isNotBlank()) {
+                                Text(
+                                    detail,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (choice.options.size > MAX_QUALITIES) {
+                    Text(
+                        "… y ${choice.options.size - MAX_QUALITIES} más",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/** Máximo de calidades que se listan (la lista no debe ser un muro). */
+private const val MAX_QUALITIES = 6
+
+/** Tamaño en bytes → texto corto ("3,2 MB"). */
+private fun formatSize(bytes: Long): String {
+    if (bytes <= 0) return ""
+    val mb = bytes / 1024.0 / 1024.0
+    return if (mb >= 1) String.format(java.util.Locale.US, "%.1f MB", mb)
+    else String.format(java.util.Locale.US, "%.0f KB", bytes / 1024.0)
+}
+
 /** Fondo que cierra al tocar afuera (igual que LanguageNote). */
 @Composable
 private fun ScrimOverlay(onDismiss: () -> Unit) {
     Box(
-        Modifier
-            .fillMaxSize()
+        Modifier            .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.55f))
             .clickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },

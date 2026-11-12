@@ -22,9 +22,10 @@ object Http {
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
     /** GET que devuelve JSON parseado. Falla con excepción si el código no es 2xx. */
-    suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
-        JSONObject(getString(url))
-    }
+    suspend fun getJson(url: String, userAgent: String = USER_AGENT): JSONObject =
+        withContext(Dispatchers.IO) {
+            JSONObject(getString(url, userAgent))
+        }
 
     /**
      * GET que devuelve un ARREGLAJO JSON (algunas APIs, como ccMixter, responden
@@ -35,20 +36,27 @@ object Http {
     }
 
     /** GET como texto (por si una fuente devuelve algo que no es JSON puro). */
-    suspend fun getString(url: String): String = withContext(Dispatchers.IO) {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        try {
-            conn.connectTimeout = 8_000
-            conn.readTimeout = 8_000
-            conn.instanceFollowRedirects = true
-            conn.setRequestProperty("Accept", "application/json, */*")
-            conn.setRequestProperty("User-Agent", USER_AGENT)
-            if (conn.responseCode !in 200..299) {
-                throw IllegalStateException("HTTP ${conn.responseCode} en $url")
+    suspend fun getString(url: String, userAgent: String = USER_AGENT): String =
+        withContext(Dispatchers.IO) {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            try {
+                conn.connectTimeout = 8_000
+                conn.readTimeout = 8_000
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("Accept", "application/json, */*")
+                conn.setRequestProperty("User-Agent", userAgent)
+                if (conn.responseCode !in 200..299) {
+                    throw IllegalStateException("HTTP ${conn.responseCode} en $url")
+                }
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } finally {
+                conn.disconnect()
             }
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            conn.disconnect()
         }
-    }
+
+    /**
+     * GET con un User-Agent propio. Hay servicios (MusicBrainz, por ejemplo) que
+     * responden 503 si el cliente dice ser un navegador: piden identificarse.
+     */
+    suspend fun getStringWithAgent(url: String, userAgent: String): String = getString(url, userAgent)
 }

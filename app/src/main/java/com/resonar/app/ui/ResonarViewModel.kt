@@ -20,6 +20,8 @@ import com.resonar.app.data.UserLibrarySnapshot
 import com.resonar.app.data.UserLibraryStore
 import com.resonar.app.data.albumArtUri
 import com.resonar.app.online.FederatedResults
+import com.resonar.app.online.AudioOption
+import com.resonar.app.online.MusicBrainz
 import com.resonar.app.online.OnlineRepository
 import com.resonar.app.online.OnlineResult
 import com.resonar.app.online.OnlineTrack
@@ -30,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -133,6 +136,8 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     val searchMode: StateFlow<Int> = _searchMode.asStateFlow()
 
     private var onlineSearchJob: Job? = null
+    /** Enriquecimiento con MusicBrainz (carátula e ISRC) de la búsqueda actual. */
+    private var enrichmentJob: Job? = null
     private var onlineDebounceJob: Job? = null
 
     fun setSearchMode(mode: Int) {
@@ -183,6 +188,53 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 failedSources = outcome.failedSources,
                 offline = false,
             )
+            // Enriquecimiento en segundo plano (MusicBrainz): completa la carátula
+            // y el ISRC de los primeros resultados. NO es imprescindible: si
+            // falla, la búsqueda y la reproducción siguen igual.
+            enrichResults(outcome.results)
+        }
+    }
+
+    /**
+     * Completa carátula e ISRC de los primeros resultados con MusicBrainz.
+     * Va en segundo plano y se aplica de golpe al final, para no reordenar la
+     * lista mientras el usuario la está mirando.
+     */
+    private fun enrichResults(results: List<OnlineResult>) {
+        enrichmentJob?.cancel()
+        enrichmentJob = vmScope.launch {
+            val enriched = results.map { it.copy(primary = it.primary) }.toMutableList()
+            var changed = false
+            enriched.take(ENRICH_LIMIT).forEachIndexed { index, result ->
+                val track = result.primary
+                if (track.artUrl != null && track.isrc != null) return@forEachIndexed
+                val info = runCatching { MusicBrainz.lookup(track.artist, track.title) }.getOrNull()
+                if (info == null) {
+                    Log.i("ResonarOnline", "MusicBrainz: sin datos para '${track.title}'")
+                    return@forEachIndexed
+                }
+                // MusicBrainz pide 1 pedido por segundo desde la misma IP.
+                delay(1_100)
+                Log.i(
+                    "ResonarOnline",
+                    "MusicBrainz: '${track.title}' -> isrc=${info.isrc ?: "—"} caratula=${if (info.coverUrl != null) "sí" else "no"}",
+                )
+                if (track.artUrl == null && info.coverUrl != null) {
+                    enriched[index] = result.copy(primary = track.copy(artUrl = info.coverUrl))
+                    changed = true
+                } else if (track.isrc == null && info.isrc != null) {
+                    enriched[index] = result.copy(primary = track.copy(isrc = info.isrc))
+                    changed = true
+                }
+            }
+            if (!changed) return@launch
+            // Al final se re-deduplica: con ISRC hay menos falsos duplicados.
+            val flat = enriched.flatMap { listOf(it.primary) + it.variants }
+            val rededuped = online.dedupe(flat)
+            val current = _onlineState.value
+            if (current.query.isNotBlank()) {
+                _onlineState.value = current.copy(results = rededuped)
+            }
         }
     }
 
@@ -234,6 +286,10 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
      * Descarga un resultado al teléfono. Una a la vez (el descargador tiene
      * Mutex). Con datos móviles AVISA y sigue: es una decisión explícita del
      * usuario, no algo que la app decida en silencio.
+     *
+     * Si la fuente ofrece MÁS DE UNA calidad, primero se le pregunta al usuario
+     * (hoja "QualitySheet"): solo se bajan calidades que la fuente de verdad
+     * tiene, con su tamaño aproximado cuando lo dice.
      */
     fun downloadOnline(track: OnlineTrack) {
         val id = track.mediaId
@@ -242,6 +298,36 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (_onlineDownloads.value[id]?.let { !it.done && it.error == null } == true) return // ya bajando
+        vmScope.launch {
+            val options = runCatching { online.qualitiesFor(track) }.getOrDefault(emptyList())
+            if (options.size > 1) {
+                _qualitySheet.value = QualityChoice(track, options)
+                return@launch
+            }
+            startDownload(track, options.firstOrNull())
+        }
+    }
+
+    /** El usuario eligió una calidad: se baja esa. */
+    fun downloadWithQuality(track: OnlineTrack, option: AudioOption) {
+        _qualitySheet.value = null
+        startDownload(track, option)
+    }
+
+    /** El usuario cerró la hoja de calidades sin elegir. */
+    fun closeQualitySheet() {
+        _qualitySheet.value = null
+    }
+
+    /** Hoja de calidades: qué tema y qué opciones ofrece su fuente. */
+    data class QualityChoice(val track: OnlineTrack, val options: List<AudioOption>)
+
+    private val _qualitySheet = MutableStateFlow<QualityChoice?>(null)
+    val qualitySheet: StateFlow<QualityChoice?> = _qualitySheet.asStateFlow()
+
+    /** La descarga en sí (ya con la calidad elegida, si la hubo). */
+    private fun startDownload(track: OnlineTrack, option: AudioOption?) {
+        val id = track.mediaId
         val downloader = container.onlineDownloader
         val spaceBlocker = downloader.spaceBlocker()
         if (spaceBlocker != null) {
@@ -255,9 +341,14 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 if (metered) {
                     Toast.makeText(getApplication(), "Descargando con datos móviles…", Toast.LENGTH_SHORT).show()
                 }
-                downloader.download(track, resolve = { online.resolveStream(it) }) { percent ->
-                    _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(percent = percent))
-                }
+                downloader.download(
+                    track,
+                    resolve = { online.resolveStream(it) },
+                    onProgress = { percent ->
+                        _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(percent = percent))
+                    },
+                    choice = option,
+                )
                 // El índice ya tiene la entrada: se recalcula desde ahí (es la verdad).
                 _downloadedIds.value = container.onlineDownloader.downloadedIds()
                 _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(done = true))
@@ -649,5 +740,10 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                     .build(),
             )
             .build()
+    }
+
+    private companion object {
+        /** Cuántos resultados se enriquecen con MusicBrainz por búsqueda. */
+        const val ENRICH_LIMIT = 8
     }
 }

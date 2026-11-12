@@ -43,9 +43,24 @@ class OnlineRepository(private val app: Context) {
 
     val registry = SourceRegistry(app)
 
+    /**
+     * Caché de resultados con vencimiento. Es una INTERFAZ a propósito: hoy es
+     * un JSON (cero dependencias, cero RAM extra) y mañana puede ser Room sin
+     * tocar nada más. Ver [SearchCache].
+     */
+    val cache: SearchCache = JsonSearchCache(app)
+
     // ── Búsqueda federada ───────────────────────────────────────────────
 
     suspend fun federatedSearch(query: String, page: Int = 0): FederatedResults {
+        // Página 0: se sirve del caché si está fresco (y sin red hace falta).
+        if (page == 0) {
+            val cached = runCatching { cache.get(query) }.getOrNull()
+            if (cached != null && cached.isNotEmpty()) {
+                android.util.Log.i("ResonarOnline", "Caché: '${query.trim()}' (${cached.size} resultados)")
+                return FederatedResults(dedupe(cached), emptyList())
+            }
+        }
         val sources = registry.enabledSources()
         if (sources.isEmpty()) return FederatedResults(emptyList(), emptyList())
         val semaphore = Semaphore(3) // máximo 3 pedidos en vuelo: red y RAM contenidas
@@ -86,7 +101,13 @@ class OnlineRepository(private val app: Context) {
                 }
             }
         }
-        return FederatedResults(dedupe(interceave(tracks)), failed)
+        val flat = interceave(tracks)
+        // Solo se cachea una búsqueda COMPLETA: si una fuente falló, los
+        // resultados están incompletos y es mejor volver a consultar.
+        if (page == 0 && failed.isEmpty() && flat.isNotEmpty()) {
+            runCatching { cache.put(query, flat) }
+        }
+        return FederatedResults(dedupe(flat), failed)
     }
 
     /**
@@ -122,7 +143,9 @@ class OnlineRepository(private val app: Context) {
         return out
     }
 
-    /** Un solo resultado por tema. El primero del grupo manda; el resto son versiones. */
+    /**
+     * Un solo resultado por tema. El primero del grupo manda; el resto son versiones.
+     */
     fun dedupe(tracks: List<OnlineTrack>): List<OnlineResult> {
         val groups = ArrayList<MutableList<OnlineTrack>>()
         for (track in tracks) {
@@ -136,8 +159,16 @@ class OnlineRepository(private val app: Context) {
      * Match difuso: título normalizado igual (o uno contiene al otro, para
      * "Tema" vs "Tema (En Vivo)"), artista igual si ambos lo informan,
      * duración dentro de ±5 s si AMBAS fuentes la informan (IA a veces no).
+     *
+     * Con ISRC no hay duda: si las dos grabaciones traen ISRC y son distintos,
+     * son canciones DISTINTAS (aunque se llamen igual: dos versiones en vivo
+     * del mismo tema tienen ISRC distintos). Si los ISRC coinciden, son la
+     * misma grabación, aunque los títulos estén escritos distinto.
      */
     private fun matches(a: OnlineTrack, b: OnlineTrack): Boolean {
+        val isrcA = a.isrc?.trim()?.takeIf { it.isNotBlank() }
+        val isrcB = b.isrc?.trim()?.takeIf { it.isNotBlank() }
+        if (isrcA != null && isrcB != null) return isrcA.equals(isrcB, ignoreCase = true)
         val ta = normalize(a.title)
         val tb = normalize(b.title)
         if (ta.isBlank() || tb.isBlank()) return false
@@ -185,15 +216,31 @@ class OnlineRepository(private val app: Context) {
             ?: throw IllegalStateException("Fuente desconocida: ${track.sourceId}")
 
     /**
-     * Pegado de URL (atajo secundario): Audius (con /v1/resolve), Internet
-     * Archive (con /metadata) o un archivo de audio directo (.mp3/.flac/…).
-     * Devuelve null si no es ninguna de esas: honesto, sin fingir.
+     * Calidades que la fuente REALMENTE ofrece para ese tema (formato, bitrate,
+     * tamaño). Vacía = la fuente tiene una sola versión (lo normal).
+     */
+    suspend fun qualitiesFor(track: OnlineTrack): List<AudioOption> =
+        runCatching { registry.byId(track.sourceId)?.listQualities(track).orEmpty() }
+            .getOrDefault(emptyList())
+
+    /**
+     * Pegado de URL (atajo secundario): se resuelve el enlace y se devuelve UN
+     * tema, listo para tocar o descargar.
+     *
+     * admitting: YouTube (watch / youtu.be / shorts), Audius, Internet Archive,
+     * Openverse (openverse.org/audio/…) y archivos de audio directos.
+     * Lo que NO se admite: Deezer (su API solo da un preview de 30 s: no sirve
+     * como reproductor) ni SoundCloud (su API no es pública).
      */
     suspend fun resolveUrl(url: String): OnlineTrack? {
+        val youtube = YoutubeSource()
+        if (youtube.canResolveUrl(url)) return runCatching { youtube.resolveUrl(url) }.getOrNull()
         val audius = AudiusSource()
         if (audius.canResolveUrl(url)) return runCatching { audius.resolveUrl(url) }.getOrNull()
         val archive = InternetArchiveSource()
         if (archive.canResolveUrl(url)) return runCatching { archive.resolveUrl(url) }.getOrNull()
+        val openverse = OpenverseSource()
+        if (openverse.canResolveUrl(url)) return runCatching { openverse.resolveUrl(url) }.getOrNull()
         val path = Uri.parse(url).path?.lowercase().orEmpty()
         val directFormats = listOf(".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav")
         if (url.startsWith("http") && directFormats.any { path.endsWith(it) }) {

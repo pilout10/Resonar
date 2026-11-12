@@ -196,30 +196,52 @@ class OnlineDownloader(private val app: Context) {
         return File("/storage/emulated/0", docId.removePrefix("primary:"))
     }
 
+    /** La extensión sale de la URL si el servidor no dice el tipo MIME. */
+    private fun guessExtFromUrl(url: String): String {
+        val path = android.net.Uri.parse(url).path?.lowercase().orEmpty()
+        return when {
+            path.endsWith(".mp3") -> "mp3"
+            path.endsWith(".m4a") -> "m4a"
+            path.endsWith(".webm") -> "webm"
+            path.endsWith(".ogg") || path.endsWith(".opus") -> "ogg"
+            path.endsWith(".flac") -> "flac"
+            path.endsWith(".wav") -> "wav"
+            else -> "mp3"
+        }
+    }
+
     // ── Descarga ───────────────────────────────────────────────────────────
 
     /**
      * Baja el tema y lo suma al índice. onProgress recibe el porcentaje 0-100,
      * o -1 si el servidor no informa el tamaño total (indeterminado).
+     *
+     * [choice] es la calidad que eligió el usuario (si la fuente ofrece más de
+     * una). Si viene, se baja ESA URL directamente; si no, se resuelve el
+     * stream como siempre.
      * Lanza excepción con mensaje claro si algo falla (la UI la muestra).
      */
     suspend fun download(
         track: OnlineTrack,
         resolve: suspend (OnlineTrack) -> StreamHandle,
         onProgress: (Int) -> Unit,
+        choice: com.resonar.app.online.AudioOption? = null,
     ): Unit = mutex.withLock {
         withContext(Dispatchers.IO) {
             // ¿Ya está? No duplicar (el botón igual se deshabilita, esto es defensa).
             if (localUriFor(track) != null) return@withContext
 
-            val handle = resolve(track)
+            val handle = choice?.let {
+                StreamHandle(android.net.Uri.parse(it.url), it.mimeType)
+            } ?: resolve(track)
             val ext = when (handle.mimeType) {
                 "audio/mpeg" -> "mp3"
                 "audio/mp4" -> "m4a"
                 "audio/webm" -> "webm"
                 "audio/ogg" -> "ogg"
                 "audio/flac" -> "flac"
-                else -> "mp3"
+                "audio/x-flac" -> "flac"
+                else -> guessExtFromUrl(handle.uri.toString())
             }
             val safeBase = "${track.artist} - ${track.title}"
                 .replace(Regex("[\\\\/:*?\"<>|]"), "_")

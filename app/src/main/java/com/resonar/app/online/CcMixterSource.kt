@@ -83,6 +83,11 @@ class CcMixterSource : MusicSource {
         val first = array.optJSONObject(0) ?: return emptyList()
         val files = first.optJSONArray("files") ?: return emptyList()
         val out = ArrayList<AudioOption>()
+        // Un tema de ccMixter puede venir en MP3, FLAC, OGG… y además en varias
+        // variantes del MISMO formato (mezclas distintas). Para elegir una
+        // CALIDAD alcanza con una opción por formato: si no, la lista es una
+        // maraña de "FLAC" repetidos.
+        val seenFormats = HashSet<String>()
         for (i in 0 until files.length()) {
             val f = files.optJSONObject(i) ?: continue
             val url = f.optString("download_url").trim()
@@ -94,8 +99,11 @@ class CcMixterSource : MusicSource {
                 mime.contains("flac") || ext == "flac" -> "FLAC"
                 ext == "mp3" || mime.contains("mpeg") -> "MP3"
                 ext == "ogg" -> "OGG"
+                ext == "opus" -> "Opus"
+                ext == "wav" -> "WAV"
                 else -> ext.uppercase().ifBlank { "AUDIO" }
             }
+            if (!seenFormats.add(format)) continue
             out.add(
                 AudioOption(
                     id = f.optString("file_id").ifBlank { url },
