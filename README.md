@@ -71,6 +71,21 @@ relevancia global, no agrupados por fuente.
 - Si una búsqueda no devuelve nada, se reintenta sola con variantes de la
   consulta (sin paréntesis, sin "feat", sin "official", sin tildes).
 
+### Descargar con calidad (2B)
+
+- Antes de bajar, si la fuente tiene **más de una versión real**, se abre una
+  hoja con las calidades que la fuente de verdad ofrece (formato, bitrate y
+  tamaño cuando los dice). Ejemplo real: ccMixter ofrece **MP3 (CBR) y FLAC
+  (VBR)** del mismo tema. No se inventan opciones.
+- Los resultados se **cachean 24 h** (archivo JSON de ~8 KB, tope de 30
+  consultas). Solo se cachea una búsqueda **completa**: si una fuente falló, se
+  vuelve a consultar.
+- **Pegar un enlace**: YouTube (watch / youtu.be / shorts), Audius, Internet
+  Archive, Openverse y archivos de audio directos.
+- **Enriquecimiento con MusicBrainz** (en segundo plano, no bloquea nada):
+  completa la carátula que faltaba y trae el ISRC cuando existe. El ISRC se
+  usa además para saber si dos resultados son la misma grabación.
+
 ## Compilar
 
 Requisitos: JDK 17 (el de Android Studio sirve), Android SDK 35, y GradleWrapper
