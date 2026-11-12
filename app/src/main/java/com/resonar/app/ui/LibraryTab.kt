@@ -206,7 +206,7 @@ fun PlaylistsPage(viewModel: ResonarViewModel) {
                 count = playlist.trackIds.count { byId[it] != null },
                 colors = playlistColors[absHash(playlist.id) % playlistColors.size],
                 icon = R.drawable.ic_playlists,
-                art = first?.let { it.artUrl ?: if (it.albumId > 0L) albumArtUri(it.albumId) else null },
+                art = first?.let { it.artUrl ?: if (it.albumArtId > 0L) albumArtUri(it.albumArtId) else null },
                 artPx = artPx,
                 onClick = { viewModel.openCollection(playlist.id) },
                 onPlay = { viewModel.playCollection(playlist.id) },
@@ -307,7 +307,7 @@ private fun AlbumPage(viewModel: ResonarViewModel, wide: Boolean) {
         gridItems(library.albums, key = { it.id }) { album ->
             Column(Modifier.clickable { viewModel.openAlbum(album.id) }) {
                 FillArt(
-                    model = albumArtUri(album.id),
+                    model = if (album.artId > 0L) albumArtUri(album.artId) else null,
                     modifier = Modifier.fillMaxWidth().height(if (wide) 180.dp else 148.dp),
                     corner = 16.dp,
                     maxDecodePx = artPx,

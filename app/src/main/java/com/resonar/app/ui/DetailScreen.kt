@@ -82,7 +82,13 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             when (detail) {
-                is LibraryDetail.Album -> TrackArt(albumArtUri(detail.id), 84.dp, 18.dp, artPx)
+                is LibraryDetail.Album -> TrackArt(
+                    library.albums.firstOrNull { it.id == detail.id }
+                        ?.let { if (it.artId > 0L) albumArtUri(it.artId) else null },
+                    84.dp,
+                    18.dp,
+                    artPx,
+                )
                 is LibraryDetail.Artist -> ArtistAvatar(title, 84.dp, 22.dp)
                 is LibraryDetail.Genre -> GradientTile(
                     listOf(Color(0xFF6D28D9), Color(0xFFDB2777)),

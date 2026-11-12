@@ -79,8 +79,8 @@ fun HomeTab(viewModel: ResonarViewModel, wide: Boolean) {
     val artPx = artDecodePx(if (wide) 160f else 132f, playback.audioQuality, playback.dataSaver)
     val cardWidth = if (wide) 156.dp else 128.dp
     val heroArt = playback.currentArtUri
-        ?: recent.firstOrNull()?.let { albumArtUri(it.albumId) }
-        ?: library.albums.firstOrNull()?.let { albumArtUri(it.id) }
+        ?: recent.firstOrNull()?.let { if (it.albumArtId > 0L) albumArtUri(it.albumArtId) else null }
+        ?: library.albums.firstOrNull()?.let { if (it.artId > 0L) albumArtUri(it.artId) else null }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -250,7 +250,12 @@ fun HomeTab(viewModel: ResonarViewModel, wide: Boolean) {
                             Column(
                                 modifier = Modifier.width(cardWidth).clickable { viewModel.openAlbum(album.id) },
                             ) {
-                                TrackArt(albumArtUri(album.id), cardWidth, 16.dp, artPx)
+                                TrackArt(
+                                    if (album.artId > 0L) albumArtUri(album.artId) else null,
+                                    cardWidth,
+                                    16.dp,
+                                    artPx,
+                                )
                                 Spacer(Modifier.height(8.dp))
                                 Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                                 Text(album.artistName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

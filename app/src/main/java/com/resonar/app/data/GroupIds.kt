@@ -1,0 +1,34 @@
+package com.resonar.app.data
+
+/**
+ * Ids de agrupación: artista y álbum.
+ *
+ * POR QUÉ NO USAR EL ID DE MEDIASTORE:
+ * MediaStore da un id real de artista solo para los archivos que TRAEN la
+ * etiqueta. Para los que no la traen (casi todas las descargas en línea y
+ * muchos mp3 sueltos) devuelve 0 para TODOS: si se usara ese id, todas las
+ * canciones sin artista caerían en un solo artista y la pestaña "Artistas"
+ * mostraría un grupo con el nombre del primero que se coló.
+ *
+ * Por eso el id se calcula del NOMBRE que ve el usuario: es lo que la
+ * pestaña muestra y lo que la persona espera ver junto.
+ *
+ * Los ids son negativos para no pisar los de MediaStore (que son positivos y
+ * enormes).
+ */
+object GroupIds {
+
+    /** Id estable y negativo a partir de una clave (artista o álbum). */
+    fun of(key: String): Long {
+        var h = 1125899906842597L
+        for (c in key) h = 31L * h + c.code
+        val positive = h and Long.MAX_VALUE
+        return if (positive == 0L) -3L else -positive
+    }
+
+    /** Id del grupo de un artista (por nombre, sin distinguir mayúsculas). */
+    fun artist(name: String): Long = of("artist|${name.trim().lowercase()}")
+
+    /** Id del grupo de un álbum (por nombre, sin distinguir mayúsculas). */
+    fun album(name: String): Long = of("album|${name.trim().lowercase()}")
+}

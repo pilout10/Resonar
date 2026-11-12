@@ -75,6 +75,7 @@ data class PlaybackUiState(
     val eqPresetName: String = "Apagado",
     val eqPresets: List<String> = emptyList(),
     val eqBands: List<EqBandUi> = emptyList(),
+    val bass: Int = 0,
 )
 
 /**
@@ -100,6 +101,7 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
             dataSaver = store.isDataSaver(),
             eqEnabled = store.isEqEnabled(),
             eqPresetName = store.getEqPresetName(),
+            bass = store.getBassStrength(),
         ),
     )
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
@@ -375,16 +377,39 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
         if (store.getEqPresetName() != "Personalizado") store.setEqPresetName("Personalizado")
         if (!store.isEqEnabled()) store.setEqEnabled(true)
         store.setEqLevels(levels)
-        _state.update { it.copy(eqEnabled = true, eqPresetName = "Personalizado") }
+        _state.update { state ->
+            state.copy(
+                eqEnabled = true,
+                eqPresetName = "Personalizado",
+                eqBands = state.eqBands.map { band ->
+                    if (band.index == index) band.copy(levelMb = levelMb) else band
+                },
+            )
+        }
+    }
+
+    /** Graves extra, 0 a 1000. No cambia el archivo: solo el parlante o los auriculares. */
+    fun setBass(strength: Int) {
+        val value = strength.coerceIn(0, 1000)
+        store.setBassStrength(value)
+        _state.update { it.copy(bass = value) }
     }
 
     fun commitEqBand(index: Int, levelMb: Int) = previewEqBand(index, levelMb)
 
     fun setEqEnabled(enabled: Boolean) {
-        store.setEqEnabled(enabled)
+        if (enabled && store.getEqPresetName() == "Apagado") store.setEqPresetName("Personalizado")
         if (!enabled) store.setEqPresetName("Apagado")
+        store.setEqEnabled(enabled)
         _state.update {
-            it.copy(eqEnabled = enabled, eqPresetName = if (enabled) it.eqPresetName else "Apagado")
+            it.copy(
+                eqEnabled = enabled,
+                eqPresetName = if (enabled) {
+                    if (it.eqPresetName == "Apagado") "Personalizado" else it.eqPresetName
+                } else {
+                    "Apagado"
+                },
+            )
         }
     }
 
@@ -467,6 +492,7 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
                 eqPresetName = snap.presetName,
                 eqPresets = snap.presets,
                 eqBands = snap.bands,
+                bass = snap.bass,
             )
         }
     }

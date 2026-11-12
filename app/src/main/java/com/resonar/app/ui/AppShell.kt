@@ -139,14 +139,16 @@ fun AppShell(viewModel: ResonarViewModel) {
         Overlay(showSettings, fromEnd = true) {
             SettingsScreen(viewModel, playback, viewModel::closeSettings)
         }
-        Overlay(showEqualizer, fromEnd = true) {
-            EqualizerScreen(viewModel, playback, viewModel::closeEqualizer)
-        }
         Overlay(fullPlayer, fromEnd = false) {
             PlayerScreen(viewModel, playback, inPane = false, onBack = viewModel::closePlayer)
         }
         Overlay(showQueue, fromEnd = false) {
             QueueScreen(viewModel, playback, viewModel::closeQueue)
+        }
+        // El ecualizador se abre desde Configuración y desde la tarjeta.
+        // Tiene que quedar último: si va debajo de la tarjeta, los toques no le llegan.
+        Overlay(showEqualizer, fromEnd = true) {
+            EqualizerScreen(viewModel, playback, viewModel::closeEqualizer)
         }
 
         val picked = pickerTrack

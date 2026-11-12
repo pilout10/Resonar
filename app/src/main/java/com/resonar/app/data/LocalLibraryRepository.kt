@@ -28,6 +28,12 @@ data class LocalTrack(
     val artist: String,
     val album: String,
     val albumId: Long,
+    /**
+     * Id REAL del álbum en MediaStore (0 si no viene de MediaStore). Sirve solo
+     * para pedir la carátula: el id de agrupación ([albumId]) es propio y no
+     * existe en MediaStore.
+     */
+    val albumArtId: Long = 0L,
     val artistId: Long,
     val durationMs: Long,
     val trackNo: Int,
@@ -53,7 +59,14 @@ data class LocalTrack(
 data class ArtistInfo(val id: Long, val name: String, val trackCount: Int)
 
 /** Un álbum para la pestaña de álbumes. */
-data class AlbumInfo(val id: Long, val name: String, val artistName: String, val trackCount: Int)
+data class AlbumInfo(
+    val id: Long,
+    val name: String,
+    val artistName: String,
+    val trackCount: Int,
+    /** Id real de MediaStore para pedir la carátula (0 si el álbum es sintético). */
+    val artId: Long = 0L,
+)
 
 /**
  * Estado entero de la biblioteca. Los mapas agrupados (artista/álbum) se
@@ -179,7 +192,17 @@ class LocalLibraryRepository(
 
         val albumList = byAlbum.map { (id, list) ->
             val name = list.firstOrNull { it.album.isNotBlank() }?.album ?: "<Sin álbum>"
-            AlbumInfo(id, name, list.first().artist, list.size)
+            // La carátula se pide con el id REAL de MediaStore (si el álbum vino de ahí).
+            val artId = list.firstOrNull { it.albumArtId > 0L }?.albumArtId ?: 0L
+            // Un álbum con canciones de varios artistas (la carpeta "Descargas", por
+            // ejemplo) no es de uno solo: saying "PALO" sería mentiroso.
+            val albumArtists = list.map { it.artist }.filter { it.isNotBlank() }.distinct()
+            val artistName = when (albumArtists.size) {
+                0 -> "<Sin artista>"
+                1 -> albumArtists.first()
+                else -> "Varios artistas"
+            }
+            AlbumInfo(id, name, artistName, list.size, artId)
         }.sortedBy { it.name.lowercase() }
 
         _state.value = _state.value.copy(
@@ -209,8 +232,8 @@ class LocalLibraryRepository(
             title = title,
             artist = artist,
             album = "Descargas",
-            albumId = DOWNLOADS_ALBUM_ID,
-            artistId = stableNegativeId("artist|$artist"),
+            albumId = GroupIds.album("Descargas"),
+            artistId = GroupIds.artist(artist),
             durationMs = entry.durationMs ?: 0L,
             trackNo = 0,
             folder = "Descargas",
@@ -281,7 +304,6 @@ class LocalLibraryRepository(
             val colArtist = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val colAlbum = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val colAlbumId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val colArtistId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)
             val colDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val colTrack = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
             val colData = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
@@ -364,8 +386,9 @@ class LocalLibraryRepository(
                         title = title,
                         artist = artist,
                         album = album,
-                        albumId = cursor.getLong(colAlbumId),
-                        artistId = cursor.getLong(colArtistId),
+                        albumId = GroupIds.album(album),
+                        albumArtId = cursor.getLong(colAlbumId),
+                        artistId = GroupIds.artist(artist),
                         durationMs = durationMs,
                         trackNo = cursor.getInt(colTrack) % 1000, // el número real de pista (TRACK trae álbum*1000+n)
                         folder = folder,

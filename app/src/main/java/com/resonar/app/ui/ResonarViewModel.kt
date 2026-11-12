@@ -578,6 +578,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun setDataSaver(enabled: Boolean) = playback.setDataSaver(enabled)
     fun setEqEnabled(enabled: Boolean) = playback.setEqEnabled(enabled)
+    fun setBass(strength: Int) = playback.setBass(strength)
     fun setEqPreset(name: String) = playback.setEqPreset(name)
     fun previewEqBand(index: Int, levelMb: Int) = playback.previewEqBand(index, levelMb)
     fun commitEqBand(index: Int, levelMb: Int) = playback.commitEqBand(index, levelMb)
@@ -617,7 +618,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         // La carátula: la URL de la fuente en línea si la hay (descargas de
         // YouTube), si no la de MediaStore (álbum del teléfono).
         val artUri: Uri? = artUrl?.let { Uri.parse(it) }
-            ?: if (albumId > 0) albumArtUri(albumId) else null
+            ?: if (albumArtId > 0) albumArtUri(albumArtId) else null
         // Si el tema de nube ya fue descargado al teléfono, tocar la copia local:
         // arranca al toque y sin internet. Si no, su URI original (Drive la baja).
         val playUri = container.librarySyncer.localUriFor(this) ?: Uri.parse(uri)

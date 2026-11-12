@@ -168,6 +168,13 @@ class PlaybackStateStore(context: Context) {
         prefs.edit().putString(KEY_EQ_LEVELS, levels.joinToString(",")).apply()
     }
 
+    /** 0 a 1000. Graves extra del teléfono, aparte de las bandas. */
+    fun getBassStrength(): Int = prefs.getInt(KEY_BASS, 0).coerceIn(0, 1000)
+
+    fun setBassStrength(strength: Int) {
+        prefs.edit().putInt(KEY_BASS, strength.coerceIn(0, 1000)).apply()
+    }
+
     fun getEqSnapshotJson(): String? = prefs.getString(KEY_EQ_SNAPSHOT, null)
 
     fun setEqSnapshotJson(json: String) {
@@ -203,5 +210,6 @@ class PlaybackStateStore(context: Context) {
         const val KEY_EQ_PRESET = "eq_preset"
         const val KEY_EQ_LEVELS = "eq_levels"
         const val KEY_EQ_SNAPSHOT = "eq_snapshot"
+        const val KEY_BASS = "eq_bass"
     }
 }

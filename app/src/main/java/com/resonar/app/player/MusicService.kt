@@ -96,6 +96,14 @@ class MusicService : MediaSessionService() {
             )
             .build()
 
+        // Sin un id propio, en este Motorola audioSessionId queda en 0 y el
+        // ecualizador nunca se crea: el interruptor queda gris.
+        val audioManager = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val sessionId = audioManager.generateAudioSessionId()
+        if (sessionId != android.media.AudioManager.ERROR) {
+            player.setAudioSessionId(sessionId)
+        }
+
         focusHandler = AudioFocusHandler(this, player) { store.isKeepPlayingEnabled() }
         tone = PlaybackEqualizer(store, player).also { it.start() }
 
@@ -134,6 +142,11 @@ class MusicService : MediaSessionService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 Log.i("ResonarPlayer", "isPlaying=$isPlaying pos=${player.currentPosition} ms")
+                tone?.refreshSession()
+            }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                Log.i("ResonarPlayer", "audioSessionId=$audioSessionId")
                 tone?.refreshSession()
             }
 

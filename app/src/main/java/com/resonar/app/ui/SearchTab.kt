@@ -254,7 +254,12 @@ fun SearchTab(viewModel: ResonarViewModel, wide: Boolean) {
                         ) {
                             items(albums, key = { it.id }) { album ->
                                 Column(Modifier.width(card).clickable { viewModel.openAlbum(album.id) }) {
-                                    TrackArt(albumArtUri(album.id), card, 16.dp, artPx)
+                                    TrackArt(
+                                        if (album.artId > 0L) albumArtUri(album.artId) else null,
+                                        card,
+                                        16.dp,
+                                        artPx,
+                                    )
                                     Spacer(Modifier.height(6.dp))
                                     Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                                     Text(album.artistName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -58,14 +58,13 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
             Switch(
                 checked = playback.eqEnabled,
                 onCheckedChange = viewModel::setEqEnabled,
-                enabled = playback.eqAvailable,
             )
         }
         Text(
             if (playback.eqAvailable) {
-                "Ajusta el sonido de lo que está sonando. Los presets salen del teléfono."
+                "Plano, graves, voces y brillo los arma la app. Los otros presets salen del teléfono. Graves extra suma pegada sin tocar el archivo."
             } else {
-                "Reproducí una canción para activar el ecualizador. Si este teléfono no lo permite, el audio sigue igual."
+                "Poné una canción. Si el teléfono no tiene ecualizador, el interruptor se guarda pero el sonido no cambia."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -78,6 +77,11 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
                 PresetChip("Apagado", playback.eqPresetName == "Apagado" || !playback.eqEnabled) {
                     viewModel.setEqPreset("Apagado")
                 }
+                listOf("Plano", "Más graves", "Voces", "Brillo").forEach { name ->
+                    PresetChip(name, playback.eqEnabled && playback.eqPresetName == name) {
+                        viewModel.setEqPreset(name)
+                    }
+                }
                 playback.eqPresets.forEach { name ->
                     PresetChip(name, playback.eqEnabled && playback.eqPresetName == name) {
                         viewModel.setEqPreset(name)
@@ -88,6 +92,8 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
                 }
             }
             Spacer(Modifier.height(18.dp))
+            BassSlider(playback.bass, viewModel)
+            Spacer(Modifier.height(8.dp))
             playback.eqBands.forEach { band ->
                 BandSlider(band, viewModel)
             }
@@ -112,9 +118,38 @@ private fun PresetChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
+private fun BassSlider(strength: Int, viewModel: ResonarViewModel) {
+    var dragging by remember { mutableStateOf(false) }
+    var local by remember { mutableFloatStateOf(strength.toFloat()) }
+    val shown = if (dragging) local else strength.toFloat()
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Graves extra", modifier = Modifier.weight(0.4f), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "${(shown / 10f).toInt()}%",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Slider(
+        value = shown.coerceIn(0f, 1000f),
+        onValueChange = {
+            dragging = true
+            local = it
+            viewModel.setBass(it.toInt())
+        },
+        onValueChangeFinished = { dragging = false },
+        valueRange = 0f..1000f,
+        colors = SliderDefaults.colors(
+            thumbColor = MaterialTheme.colorScheme.primary,
+            activeTrackColor = MaterialTheme.colorScheme.primary,
+        ),
+    )
+}
+
+@Composable
 private fun BandSlider(band: EqBandUi, viewModel: ResonarViewModel) {
     var dragging by remember(band.index) { mutableStateOf(false) }
-    var local by remember(band.index, band.levelMb) { mutableFloatStateOf(band.levelMb.toFloat()) }
+    var local by remember(band.index) { mutableFloatStateOf(band.levelMb.toFloat()) }
     val shown = if (dragging) local else band.levelMb.toFloat()
     val min = band.minMb.toFloat()
     val max = band.maxMb.toFloat().coerceAtLeast(min + 1f)
