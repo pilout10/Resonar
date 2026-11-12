@@ -108,10 +108,16 @@ class SourceRegistry(context: Context) {
      * Todas las fuentes, en el ORDEN DE PRIORIDAD (la primera es la que se
      * consulta primero y la que gana si dos fuentes traen lo mismo).
      * YouTube va primero: es el catálogo más amplio que existe.
+     *
+     * DEEZER NO ESTÁ EN LA LISTA: su API pública solo entrega un PREVIEW de
+     * 30 segundos, no el tema entero. Un reproductor con previews es ruido, así
+     * que no aparece en las búsquedas. La clase sigue en el proyecto porque su
+     * API es una de las mejores para METADATOS (ISRC, año, sello, carátula
+     * grande) y se usa para completar la info de los resultados de otras
+     * fuentes, sin que el usuario vea temas que suenan a medias.
      */
     val sources: List<MusicSource> = listOf(
         YoutubeSource(),
-        DeezerSource(),
         AudiusSource(),
         CcMixterSource(),
         OpenverseSource(),

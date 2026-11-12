@@ -54,7 +54,7 @@ relevancia global, no agrupados por fuente.
 | Fuente | Qué es | Qué entrega |
 |---|---|---|
 | **YouTube** | NewPipeExtractor (extractor, no API) | Tema entero. Carátula de YouTube |
-| **Deezer** | API oficial, sin key | Búsqueda, carátula y **previo de 30 s** (su API pública no da el tema entero) |
+| **Deezer** | API oficial, sin key | **Fuera de las búsquedas**: su API pública da un previo de 30 s, no el tema entero. Solo se usa como fuente de metadatos (ISRC, año, sello, carátula grande) |
 | **Audius** | API oficial, sin key | Tema entero (MP3) |
 | **ccMixter** | API oficial, sin key | Tema entero en MP3/FLAC, con licencia Creative Commons |
 | **Openverse** | API oficial, sin key | Agregador (Jamendo, Freesound, Wikimedia): tema entero con su licencia |
@@ -65,6 +65,9 @@ relevancia global, no agrupados por fuente.
   Sin la línea, la fuente no se usa y el resto de la app funciona igual.
 - **SoundCloud** quedó afuera: su API exige un `client_id` que hoy no se puede
   descubrir de forma confiable (el que sale del bundle web da 403/404).
+- **Free Music Archive** quedó afuera: su API JSON ya no existe (devuelve HTML).
+- **Todas las fuentes de la lista dan el tema COMPLETO**: no se incluyen
+  fuentes que solo entreguen previews.
 - Si una búsqueda no devuelve nada, se reintenta sola con variantes de la
   consulta (sin paréntesis, sin "feat", sin "official", sin tildes).
 
