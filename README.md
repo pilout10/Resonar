@@ -45,6 +45,29 @@ Si algo externo se rompe (sobre todo YouTube), el procedimiento está en
   donde se desarrolla. Hay respaldos en `../respaldos/` y un `.gitignore` listo
   para cuando se instale.
 
+## Fuentes en línea (buscador federado)
+
+Se consultan **en paralelo** (máximo 3 a la vez, timeout de 8 s por fuente):
+una fuente caída no rompe a las demás, y los resultados se intercalan por
+relevancia global, no agrupados por fuente.
+
+| Fuente | Qué es | Qué entrega |
+|---|---|---|
+| **YouTube** | NewPipeExtractor (extractor, no API) | Tema entero. Carátula de YouTube |
+| **Deezer** | API oficial, sin key | Búsqueda, carátula y **previo de 30 s** (su API pública no da el tema entero) |
+| **Audius** | API oficial, sin key | Tema entero (MP3) |
+| **ccMixter** | API oficial, sin key | Tema entero en MP3/FLAC, con licencia Creative Commons |
+| **Openverse** | API oficial, sin key | Agregador (Jamendo, Freesound, Wikimedia): tema entero con su licencia |
+| **Internet Archive** | API oficial, sin key | Tema entero (MP3/M4A/OGG/FLAC), dominio público y CC |
+| **Jamendo** | API oficial, **requiere key** | Tema entero. Se saltea sola si no hay key |
+
+- **Key de Jamendo** (gratis): en `local.properties` → `jamendo.client_id=TU_ID`.
+  Sin la línea, la fuente no se usa y el resto de la app funciona igual.
+- **SoundCloud** quedó afuera: su API exige un `client_id` que hoy no se puede
+  descubrir de forma confiable (el que sale del bundle web da 403/404).
+- Si una búsqueda no devuelve nada, se reintenta sola con variantes de la
+  consulta (sin paréntesis, sin "feat", sin "official", sin tildes).
+
 ## Compilar
 
 Requisitos: JDK 17 (el de Android Studio sirve), Android SDK 35, y GradleWrapper

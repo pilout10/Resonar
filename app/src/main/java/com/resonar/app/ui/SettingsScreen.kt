@@ -51,11 +51,9 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
     val library by viewModel.libraryState.collectAsState()
     val sync by viewModel.syncProgress.collectAsState()
     val enabledSources by viewModel.enabledSources.collectAsState()
-    val sourceToggles = listOf(
-        "audius" to "Audius",
-        "archive" to "Internet Archive",
-        "youtube" to "YouTube",
-    )
+    val sourceToggles = remember(viewModel) {
+        viewModel.sourceCatalog().map { it.id to it.displayName }
+    }
     var qualitySheet by remember { mutableStateOf(false) }
     var libraryDialog by remember { mutableStateOf(false) }
     val systemTheme = playback.themeMode == "system"
@@ -138,6 +136,17 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
                     onCheckedChange = { viewModel.setSourceEnabled(id, it) },
                 )
             })
+        }
+        val pendingKeys = viewModel.pendingKeySources()
+        if (pendingKeys.isNotEmpty()) {
+            Text(
+                "${pendingKeys.joinToString(", ")} necesita una API key propia " +
+                    "(se pide gratis en el portal del servicio y se carga en local.properties). " +
+                    "Sin key, esa fuente simplemente no se usa y el resto sigue igual.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
         }
         if (enabledSources["youtube"] == true) {
             Text(

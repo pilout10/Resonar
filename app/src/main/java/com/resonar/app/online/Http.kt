@@ -26,6 +26,14 @@ object Http {
         JSONObject(getString(url))
     }
 
+    /**
+     * GET que devuelve un ARREGLAJO JSON (algunas APIs, como ccMixter, responden
+     * con [...] en la raíz y no con {...}).
+     */
+    suspend fun getJsonArray(url: String): org.json.JSONArray = withContext(Dispatchers.IO) {
+        org.json.JSONArray(getString(url))
+    }
+
     /** GET como texto (por si una fuente devuelve algo que no es JSON puro). */
     suspend fun getString(url: String): String = withContext(Dispatchers.IO) {
         val conn = URL(url).openConnection() as HttpURLConnection

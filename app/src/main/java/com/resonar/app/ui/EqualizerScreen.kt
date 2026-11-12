@@ -70,7 +70,7 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        if (playback.eqAvailable) {
+        if (playback.eqEnabled || playback.eqAvailable) {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             ) {

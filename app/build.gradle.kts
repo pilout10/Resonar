@@ -1,9 +1,24 @@
+import java.util.Properties
+
 // Módulo principal de Resonar.
 //
 // Decisiones de versión:
 //  - minSdk 24: cubre la gran mayoría de Android ( requisito pedido ).
 //  - targetSdk 35: la versión estable más reciente (Android 15).
 //  - Java 17: bytecode de la app. AGP 9 aplica Kotlin solo; no hace falta el plugin kotlin.android.
+//
+// CONFIG LOCAL (no se versiona): la key de Jamendo se lee de "local.properties".
+// Es gratuita, se pide en https://devportal.jamendo.com/signup y se usa así:
+//
+//     jamendo.client_id=TU_CLIENT_ID
+//
+// Si la línea no está, la fuente Jamendo se saltea sola y el resto de la app
+// funciona igual (no se rompe nada por falta de key).
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val jamendoClientId = (localProps.getProperty("jamendo.client_id") ?: "").trim()
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -20,6 +35,9 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "1.0"
+
+        // Key de Jamendo (fuente en línea). Vacía = la fuente se saltea sola.
+        buildConfigField("String", "JAMENDO_CLIENT_ID", "\"$jamendoClientId\"")
     }
 
     buildTypes {

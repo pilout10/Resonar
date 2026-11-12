@@ -8,6 +8,7 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
@@ -92,12 +93,51 @@ class SmartDataSourceFactory(
 ) : DataSource.Factory {
 
     private val appContext = context.applicationContext
+    /** Archivos locales: lectura directa, sin cabeceras HTTP. */
     private val localFactory = DefaultDataSource.Factory(appContext)
-    private val httpFactory = DefaultDataSource.Factory(appContext)
+    /**
+     * HTTP con User-Agent de navegador: algunos CDN (ccMixter, por ejemplo)
+     * responden 403 al User-Agent por defecto de ExoPlayer ("ExoPlayerLib/1.5.1").
+     * Se permiten redirecciones entre protocolos (http → https), que es lo que
+     * hacen los CDN de Jamendo y de otros.
+     */
+    private val httpFactory: DataSource.Factory = DefaultDataSource.Factory(
+        appContext,
+        DefaultHttpDataSource.Factory()
+            .setUserAgent(com.resonar.app.online.Http.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true),
+    )
+
+    /**
+     * ccMixter (y algún CDN parecido) exige una cabecera "Referer" de su propio
+     * sitio: sin eso responde 403 aunque el User-Agent sea de navegador.
+     * Por eso hay una segunda fábrica, SOLO para esos hosts.
+     */
+    private val refererFactory: DataSource.Factory = DefaultDataSource.Factory(
+        appContext,
+        DefaultHttpDataSource.Factory()
+            .setUserAgent(com.resonar.app.online.Http.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(mapOf("Referer" to "https://ccmixter.org/")),
+    )
+
+    /** Hosts que exigen su propio Referer. */
+    private val needsReferer = setOf("ccmixter.org", "www.ccmixter.org")
 
     override fun createDataSource(): DataSource =
-        RoutingDataSource(localFactory) {
-            if (useCache()) {
+        RoutingDataSource(localFactory) { uri ->
+            val host = uri.host?.lowercase().orEmpty()
+            if (host in needsReferer) {
+                // Con caché también: el archivo se guarda igual en el disco.
+                if (useCache()) {
+                    CacheDataSource.Factory()
+                        .setCache(StreamCacheHolder.get(appContext))
+                        .setUpstreamDataSourceFactory(refererFactory)
+                        .createDataSource()
+                } else {
+                    refererFactory.createDataSource()
+                }
+            } else if (useCache()) {
                 CacheDataSource.Factory()
                     .setCache(StreamCacheHolder.get(appContext))
                     .setUpstreamDataSourceFactory(httpFactory)
@@ -112,7 +152,7 @@ class SmartDataSourceFactory(
 @UnstableApi
 class RoutingDataSource(
     private val localFactory: DataSource.Factory,
-    private val cloudFactory: () -> DataSource,
+    private val cloudFactory: (Uri) -> DataSource,
 ) : DataSource {
 
     private val listeners = mutableListOf<TransferListener>()
@@ -124,7 +164,7 @@ class RoutingDataSource(
     }
 
     override fun open(dataSpec: DataSpec): Long {
-        val ds = if (isLocalMediaUri(dataSpec.uri)) localFactory.createDataSource() else cloudFactory()
+        val ds = if (isLocalMediaUri(dataSpec.uri)) localFactory.createDataSource() else cloudFactory(dataSpec.uri)
         listeners.forEach { ds.addTransferListener(it) }
         child = ds
         return ds.open(dataSpec)

@@ -182,6 +182,15 @@ private fun OnlineRow(
                     Spacer(Modifier.width(6.dp))
                     OnlineBadge(track.license, highlighted = false)
                 }
+                // Si la fuente solo puede dar un previo (Deezer: 30 s), se dice.
+                if (track.isPreview) {
+                    Spacer(Modifier.width(6.dp))
+                    OnlineBadge("previo 30 s", highlighted = false)
+                }
+                if (track.providerLabel != null) {
+                    Spacer(Modifier.width(6.dp))
+                    OnlineBadge(track.providerLabel, highlighted = false)
+                }
             }
         }
         Text(
@@ -286,6 +295,10 @@ private fun sourceLabel(sourceId: String): String = when (sourceId) {
     "audius" -> "Audius"
     "archive" -> "Internet Archive"
     "youtube" -> "YouTube"
+    "deezer" -> "Deezer"
+    "ccmixter" -> "ccMixter"
+    "openverse" -> "Openverse"
+    "jamendo" -> "Jamendo"
     "url" -> "Enlace"
     else -> sourceId
 }

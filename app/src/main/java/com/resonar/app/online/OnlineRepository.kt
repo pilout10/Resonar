@@ -49,12 +49,13 @@ class OnlineRepository(private val app: Context) {
         val sources = registry.enabledSources()
         if (sources.isEmpty()) return FederatedResults(emptyList(), emptyList())
         val semaphore = Semaphore(3) // máximo 3 pedidos en vuelo: red y RAM contenidas
-        return coroutineScope {
+
+        suspend fun runAll(q: String): Pair<List<List<OnlineTrack>>, List<String>> = coroutineScope {
             val perSource = sources.map { source ->
                 async {
                     semaphore.withPermit {
                         try {
-                            withTimeout(8_000) { source.search(query, page) }
+                            withTimeout(8_000) { source.search(q, page) }
                         } catch (e: Exception) {
                             android.util.Log.w(
                                 "ResonarOnline",
@@ -67,9 +68,47 @@ class OnlineRepository(private val app: Context) {
             }.awaitAll()
             val failed = sources.map { it.displayName }
                 .filterIndexed { index, _ -> perSource[index] == null }
-            val tracks = perSource.filterNotNull()
-            FederatedResults(dedupe(interceave(tracks)), failed)
+            perSource.filterNotNull() to failed
         }
+
+        var (tracks, failed) = runAll(query)
+        // Si NADIE devolvió nada, se reintenta con variantes de la consulta
+        // ("adele feat. x" → "adele", sin tildes, sin paréntesis). Es lo que pide
+        // el plan: una búsqueda vacía se reintenta con las variantes normalizadas.
+        if (tracks.all { it.isEmpty() }) {
+            for (variant in queryVariants(query)) {
+                android.util.Log.i("ResonarOnline", "Sin resultados: reintento con '$variant'")
+                val retry = runAll(variant)
+                if (retry.first.any { it.isNotEmpty() }) {
+                    tracks = retry.first
+                    failed = retry.second
+                    break
+                }
+            }
+        }
+        return FederatedResults(dedupe(interceave(tracks)), failed)
+    }
+
+    /**
+     * Variantes de una consulta para reintentar cuando no hay resultados:
+     * sin paréntesis, sin "feat", sin tildes y sin palabras de versión.
+     */
+    fun queryVariants(query: String): List<String> {
+        val out = ArrayList<String>(4)
+        val withoutParens = query.replace(Regex("[()\\[\\]]"), " ").replace(Regex("\\s+"), " ").trim()
+        if (withoutParens.isNotBlank() && withoutParens != query) out.add(withoutParens)
+        val withoutFeat = withoutParens.replace(Regex("(?i)\\b(feat|ft|featuring)\\b.*$"), "").trim()
+        if (withoutFeat.isNotBlank() && withoutFeat != withoutParens) out.add(withoutFeat)
+        val withoutNoise = withoutFeat
+            .replace(Regex("(?i)\\b(official|video|audio|live|remaster(ed)?|lyrics|karaoke)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (withoutNoise.isNotBlank() && withoutNoise != withoutFeat) out.add(withoutNoise)
+        val noAccents = java.text.Normalizer.normalize(withoutNoise, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .trim()
+        if (noAccents.isNotBlank() && noAccents != withoutNoise) out.add(noAccents)
+        return out
     }
 
     /** Intercala fuente por fuente: relevancia pareja, nunca agrupado por fuente. */

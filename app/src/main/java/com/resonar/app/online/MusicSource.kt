@@ -22,9 +22,46 @@ data class OnlineTrack(
     val artUrl: String?,
     /** Ej. "Dominio público", "CC BY". null = la fuente no lo dice. */
     val license: String? = null,
+    /** Nombre del álbum, si la fuente lo da. */
+    val albumTitle: String? = null,
+    /**
+     * true si la fuente solo puede dar un PREVIO (Deezer: 30 s). La app lo
+     * muestra en el badge para no prometer la canción entera.
+     */
+    val isPreview: Boolean = false,
+    /** Fuente original detrás de un agregador (Openverse → Jamendo, Freesound…). */
+    val providerLabel: String? = null,
+    /** Código ISRC, si la fuente lo informa (sirve para deduplicar). */
+    val isrc: String? = null,
 ) {
     val mediaId: String get() = "online:$sourceId:$externalId"
 }
+
+/**
+ * UNA calidad que la fuente REALMENTE ofrece (no inventada): formato, bitrate,
+ * tamaño aproximado y la URL directa.
+ */
+data class AudioOption(
+    val id: String,
+    /** "MP3 320", "FLAC", "OGG 96"… (texto corto para la lista). */
+    val label: String,
+    val mimeType: String?,
+    /** Tamaño aproximado en bytes, si la fuente lo dice. */
+    val approxBytes: Long?,
+    /** Bitrate tal como lo informa la fuente ("CBR", "128", "VBR"…). */
+    val bitrate: String? = null,
+    /** URL directa del archivo de esa calidad. */
+    val url: String,
+)
+
+/** Datos extra de un tema, de donde la fuente los pueda sacar. */
+data class TrackMetadata(
+    val isrc: String? = null,
+    val year: Int? = null,
+    val label: String? = null,
+    val albumTitle: String? = null,
+    val artUrl: String? = null,
+)
 
 /** Lo que una fuente entrega para que ExoPlayer abra y suene. */
 data class StreamHandle(
@@ -38,6 +75,9 @@ data class StreamHandle(
  *  - search: lista de resultados para una consulta y página.
  *  - resolveStream: convierte el tema en algo jugable. Solo usa externalId,
  *    así el servicio puede re-resolver sin tener los metadatos completos.
+ *  - listQualities: qué calidades ofrece DE VERDAD (para el selector de
+ *    descarga). Por defecto, ninguna: cada fuente implementa lo que sabe.
+ *  - getMetadata: datos extra (ISRC, año, sello). Por defecto, nada.
  * Cada implementación comenta qué API usa y qué se rompe si el servicio cambia.
  */
 interface MusicSource {
@@ -46,6 +86,12 @@ interface MusicSource {
     val requiresKey: Boolean
     suspend fun search(query: String, page: Int): List<OnlineTrack>
     suspend fun resolveStream(track: OnlineTrack): StreamHandle
+
+    /** Calidades reales que ofrece la fuente para ese tema. */
+    suspend fun listQualities(track: OnlineTrack): List<AudioOption> = emptyList()
+
+    /** Datos extra del tema, si la fuente los puede dar. */
+    suspend fun getMetadata(track: OnlineTrack): TrackMetadata? = null
 }
 
 /**
@@ -58,12 +104,29 @@ class SourceRegistry(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("resonar_sources", Context.MODE_PRIVATE)
 
-    /** Las fuentes disponibles en 2A. 2B agrega YouTube acá. */
+    /**
+     * Todas las fuentes, en el ORDEN DE PRIORIDAD (la primera es la que se
+     * consulta primero y la que gana si dos fuentes traen lo mismo).
+     * YouTube va primero: es el catálogo más amplio que existe.
+     */
     val sources: List<MusicSource> = listOf(
-        AudiusSource(),
-        InternetArchiveSource(),
         YoutubeSource(),
+        DeezerSource(),
+        AudiusSource(),
+        CcMixterSource(),
+        OpenverseSource(),
+        InternetArchiveSource(),
+        JamendoSource(),
     )
+
+    /** Fuentes que se pueden usar de verdad (con key, solo si la key está puesta). */
+    fun availableSources(): List<MusicSource> = sources.filter { source ->
+        when {
+            !source.requiresKey -> true
+            source is JamendoSource -> source.isConfigured()
+            else -> true
+        }
+    }
 
     fun isEnabled(id: String): Boolean = prefs.getBoolean("enabled_$id", true)
 
@@ -71,7 +134,9 @@ class SourceRegistry(context: Context) {
         prefs.edit().putBoolean("enabled_$id", enabled).apply()
     }
 
-    fun enabledSources(): List<MusicSource> = sources.filter { isEnabled(it.id) }
+    /** Fuentes habilitadas Y disponibles, en orden de prioridad. */
+    fun enabledSources(): List<MusicSource> =
+        availableSources().filter { isEnabled(it.id) }
 
     /** Para el gancho de re-resolución del MusicService: fuente por id o null. */
     fun byId(id: String): MusicSource? = sources.firstOrNull { it.id == id }

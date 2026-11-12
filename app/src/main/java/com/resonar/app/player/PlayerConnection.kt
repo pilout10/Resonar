@@ -90,6 +90,11 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
     private val app: Context = context.applicationContext
     private val store = PlaybackStateStore(app)
 
+    private val eqJson = Json { ignoreUnknownKeys = true }
+    private val savedEqSnapshot: EqSnapshot? = store.getEqSnapshotJson()?.let { raw ->
+        runCatching { eqJson.decodeFromString<EqSnapshot>(raw) }.getOrNull()
+    }
+
     private val _state = MutableStateFlow(
         PlaybackUiState(
             keepPlaying = store.isKeepPlayingEnabled(),
@@ -99,14 +104,19 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
             autoDownload = store.isAutoDownload(),
             streamCache = store.isStreamCacheEnabled(),
             dataSaver = store.isDataSaver(),
-            eqEnabled = store.isEqEnabled(),
-            eqPresetName = store.getEqPresetName(),
-            bass = store.getBassStrength(),
+            // La foto ya guardada trae las bandas. Si no se lee al abrir,
+            // el interruptor queda prendido y las opciones no aparecen
+            // hasta apagarlo y prenderlo otra vez.
+            eqAvailable = savedEqSnapshot?.available == true || !savedEqSnapshot?.bands.isNullOrEmpty(),
+            eqEnabled = store.isEqEnabled() || savedEqSnapshot?.enabled == true,
+            eqPresetName = savedEqSnapshot?.presetName ?: store.getEqPresetName(),
+            eqPresets = savedEqSnapshot?.presets.orEmpty(),
+            eqBands = savedEqSnapshot?.bands.orEmpty(),
+            bass = savedEqSnapshot?.bass ?: store.getBassStrength(),
         ),
     )
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
-    private val eqJson = Json { ignoreUnknownKeys = true }
     private var lastEqSnapshot: String? = store.getEqSnapshotJson()
 
     private var controller: MediaController? = null

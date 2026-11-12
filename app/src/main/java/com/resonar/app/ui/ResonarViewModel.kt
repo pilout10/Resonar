@@ -315,9 +315,24 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     // ── Fuentes: toggles de Ajustes ──────────────────────────────────────
 
     private val _enabledSources = MutableStateFlow(
-        container.onlineRepository.registry.sources.associate { it.id to container.onlineRepository.registry.isEnabled(it.id) },
+        container.onlineRepository.registry.availableSources()
+            .associate { it.id to container.onlineRepository.registry.isEnabled(it.id) },
     )
     val enabledSources: StateFlow<Map<String, Boolean>> = _enabledSources.asStateFlow()
+
+    /**
+     * Catálogo de fuentes para los interruptores de Ajustes. Solo las que se
+     * pueden usar de verdad: una fuente que necesita API key y no la tiene no
+     * aparece (y se explica en un texto aparte).
+     */
+    fun sourceCatalog(): List<com.resonar.app.online.MusicSource> =
+        container.onlineRepository.registry.availableSources()
+
+    /** ¿Hay alguna fuente con key que esté esperando configuración? */
+    fun pendingKeySources(): List<String> =
+        container.onlineRepository.registry.sources
+            .filter { it.requiresKey && it !in container.onlineRepository.registry.availableSources() }
+            .map { it.displayName }
 
     fun setSourceEnabled(id: String, enabled: Boolean) {
         container.onlineRepository.registry.setEnabled(id, enabled)

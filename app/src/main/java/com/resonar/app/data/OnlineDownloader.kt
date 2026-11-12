@@ -237,6 +237,10 @@ class OnlineDownloader(private val app: Context) {
                     conn.readTimeout = 15_000
                     conn.instanceFollowRedirects = true
                     conn.setRequestProperty("User-Agent", com.resonar.app.online.Http.USER_AGENT)
+                    // ccMixter exige un Referer de su propio sitio (si no, 403).
+                    if (conn.url.host?.lowercase()?.endsWith("ccmixter.org") == true) {
+                        conn.setRequestProperty("Referer", "https://ccmixter.org/")
+                    }
                     // REANUDACIÓN: si quedó un .parte de un intento anterior (la red
                     // corta de este teléfono lo hace habitual), pedimos desde donde
                     // quedó con Range. El CDN de YouTube e IA aceptan 206.
