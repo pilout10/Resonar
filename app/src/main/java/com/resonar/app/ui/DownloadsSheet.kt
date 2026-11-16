@@ -35,10 +35,10 @@ import com.resonar.app.data.DownloadStatus
 /**
  * APARTADO "DESCARGANDO AHORA" (Etapa 3).
  *
- * El usuario lo pidiÃ³ explÃ­cito: "le hace falta un apartado que muestre quÃ©
- * se estÃ¡ descargando ahora mismo". Son dos piezas:
+ * El usuario lo pidió explícito: "le hace falta un apartado que muestre qué
+ * se está descargando ahora mismo". Son dos piezas:
  *
- *  - [DownloadStatusPill]: una pÃ­ldora compacta que vive SIEMPRE visible
+ *  - [DownloadStatusPill]: una píldora compacta que vive SIEMPRE visible
  *    (encima del mini reproductor) mientras hay algo en cola o bajando.
  *  - [DownloadsSheet]: la hoja con la cola completa, progreso y cancelar.
  *
@@ -46,7 +46,7 @@ import com.resonar.app.data.DownloadStatus
  * descarga aunque la app se haya cerrado y reabierto mientras baja.
  */
 
-/** PÃ­ldora compacta: quÃ© baja ahora y en quÃ© % estÃ¡. Tocar abre la hoja. */
+/** Píldora compacta: qué baja ahora y en qué % está. Tocar abre la hoja. */
 @Composable
 fun DownloadStatusPill(
     jobs: List<DownloadJobUi>,
@@ -109,13 +109,13 @@ fun DownloadStatusPill(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                // Indeterminado: el servidor no dio el tamaÃ±o total (o estÃ¡ en cola).
+                // Indeterminado: el servidor no dio el tamaño total (o está en cola).
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (running.status == DownloadStatus.PENDING) "En cola" else "Descargandoâ€¦",
+                    if (running.status == DownloadStatus.PENDING) "En cola" else "Descargando…",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -124,7 +124,7 @@ fun DownloadStatusPill(
     }
 }
 
-/** Hoja con la cola completa: quÃ© hay pendiente, quÃ© baja y quÃ© terminÃ³. */
+/** Hoja con la cola completa: qué hay pendiente, qué baja y qué terminó. */
 @Composable
 fun DownloadsSheet(
     jobs: List<DownloadJobUi>,
@@ -133,8 +133,8 @@ fun DownloadsSheet(
     onClose: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        // Fondo que cierra al tocar afuera (mismo patrÃ³n que las otras hojas:
-        // los diÃ¡logos de Material dentro de capas animadas no reciben el
+        // Fondo que cierra al tocar afuera (mismo patrón que las otras hojas:
+        // los diálogos de Material dentro de capas animadas no reciben el
         // toque en el Motorola).
         Box(
             Modifier
@@ -221,7 +221,7 @@ private fun DownloadJobRow(
                         LinearProgressIndicator(
                             modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
                         )
-                        Text("Descargandoâ€¦", style = MaterialTheme.typography.labelSmall)
+                        Text("Descargando…", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 DownloadStatus.PENDING -> Text(
@@ -240,7 +240,7 @@ private fun DownloadJobRow(
                     color = MaterialTheme.colorScheme.error,
                 )
                 DownloadStatus.CANCELLED -> Text(
-                    "Cancelada (el prÃ³ximo intento retoma donde quedÃ³)",
+                    "Cancelada (el próximo intento retoma donde quedó)",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -268,4 +268,3 @@ private fun DownloadJobRow(
         }
     }
 }
-
