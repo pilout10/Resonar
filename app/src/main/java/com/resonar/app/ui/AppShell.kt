@@ -224,6 +224,8 @@ fun AppShell(viewModel: ResonarViewModel) {
                 jobs = downloadJobs,
                 onCancel = viewModel::cancelDownload,
                 onDismissItem = viewModel::dismissDownload,
+                onPause = viewModel::pauseDownload,
+                onResume = viewModel::resumeDownload,
                 onClose = viewModel::closeDownloadsSheet,
             )
         }

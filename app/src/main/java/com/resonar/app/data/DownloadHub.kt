@@ -19,7 +19,7 @@ import kotlinx.coroutines.sync.withLock
  * la cola se pierde — pero con el servicio en primer plano eso es rarísimo,
  * y un .parte a medio bajar queda en el disco para reanudar.
  */
-enum class DownloadStatus { PENDING, RUNNING, DONE, ERROR, CANCELLED }
+enum class DownloadStatus { PENDING, RUNNING, PAUSED, DONE, ERROR, CANCELLED }
 
 /** Un trabajo de la cola: qué, con qué calidad y cómo viene. */
 data class DownloadJobUi(
@@ -28,6 +28,7 @@ data class DownloadJobUi(
     val status: DownloadStatus = DownloadStatus.PENDING,
     val percent: Int? = null, // null = indeterminado (el servidor no da el tamaño)
     val error: String? = null,
+    val attempts: Int = 0, // reintentos ya usados (el reintento automático lo sube)
 ) {
     val id: String get() = track.mediaId
 }
@@ -39,6 +40,9 @@ class DownloadHub {
 
     /** Ids de cancelación pedida. El worker lo consulta en cada trozo bajado. */
     private val cancelRequested = HashSet<String>()
+
+    /** Ids de pausa pedida. Igual que cancelar pero conservando el estado para retomar. */
+    private val pauseRequested = HashSet<String>()
     private val mutex = Mutex()
 
     /**
@@ -51,6 +55,7 @@ class DownloadHub {
         }
         if (active) return false
         cancelRequested.remove(track.mediaId)
+        pauseRequested.remove(track.mediaId)
         _jobs.value = _jobs.value.filterNot { it.id == track.mediaId } +
             DownloadJobUi(track = track, option = option)
         true
@@ -72,10 +77,52 @@ class DownloadHub {
 
     fun markCancelled(id: String) = update(id) { it.copy(status = DownloadStatus.CANCELLED, error = null) }
 
+    fun markPaused(id: String) = update(id) { it.copy(status = DownloadStatus.PAUSED, error = null) }
+
+    /**
+     * REINTENTO AUTOMÁTICO (Etapa 3 parte 2): tras un error transitorio
+     * (el CDN de YouTube corta conexiones seguido), el trabajo vuelve a
+     * PENDING con attempts+1 y el worker lo agarra de nuevo. El `.parte`
+     * queda en el disco: la descarga retoma desde donde quedó.
+     */
+    fun retry(id: String) = update(id) {
+        it.copy(
+            status = DownloadStatus.PENDING,
+            percent = null,
+            error = null,
+            attempts = it.attempts + 1,
+        )
+    }
+
     /** El usuario pidió cancelar. El worker se entera en el próximo trozo. */
-    suspend fun requestCancel(id: String) = mutex.withLock { cancelRequested.add(id) }
+    suspend fun requestCancel(id: String) = mutex.withLock {
+        pauseRequested.remove(id)
+        cancelRequested.add(id)
+    }
 
     fun isCancelled(id: String): Boolean = cancelRequested.contains(id)
+
+    /** El usuario pidió pausar. Se aplica al vuelo si ya está bajando. */
+    suspend fun requestPause(id: String) = mutex.withLock {
+        cancelRequested.remove(id)
+        pauseRequested.add(id)
+        // Si todavía no arrancó, se marca PAUSED acá mismo (el worker ni lo agarra).
+        val current = _jobs.value.firstOrNull { it.id == id }
+        if (current != null && current.status == DownloadStatus.PENDING) {
+            update(id) { it.copy(status = DownloadStatus.PAUSED) }
+        }
+    }
+
+    fun isPaused(id: String): Boolean = pauseRequested.contains(id)
+
+    /** Reanudar una pausada: vuelve a la cola (y el .parte se reutiliza). */
+    suspend fun resume(id: String): Boolean = mutex.withLock {
+        pauseRequested.remove(id)
+        val current = _jobs.value.firstOrNull { it.id == id && it.status == DownloadStatus.PAUSED }
+        if (current == null) return false
+        update(id) { it.copy(status = DownloadStatus.PENDING, error = null) }
+        true
+    }
 
     /** ¿Hay algo en cola o bajando? (para mostrar la píldora y mantener el servicio) */
     fun hasActive(): Boolean = _jobs.value.any {

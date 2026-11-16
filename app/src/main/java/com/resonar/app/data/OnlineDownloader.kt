@@ -47,6 +47,12 @@ import java.net.URL
  *  - avisa si está usando datos móviles (el usuario decide tocando el botón,
  *    la descarga no se frena a mitad de camino).
  */
+/**
+ * Señal de pausa pedida por el usuario: corta la descarga por el `.parte`
+ * pero NO es un error — el servicio lo sabe y marca el trabajo PAUSED.
+ */
+class DownloadPausedException : Exception("Pausada")
+
 class OnlineDownloader(private val app: Context) {
 
     /** Entrada del índice: lo mínimo para reproducir y redibujar la fila. */
@@ -227,6 +233,7 @@ class OnlineDownloader(private val app: Context) {
         onProgress: (Int) -> Unit,
         choice: com.resonar.app.online.AudioOption? = null,
         shouldCancel: () -> Boolean = { false },
+        shouldPause: () -> Boolean = { false },
     ): Unit = mutex.withLock {
         withContext(Dispatchers.IO) {
             // ¿Ya está? No duplicar (el botón igual se deshabilita, esto es defensa).
@@ -287,11 +294,13 @@ class OnlineDownloader(private val app: Context) {
                         java.io.FileOutputStream(temp, append).use { output ->
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
-                                // CANCELACIÓN cooperativa: HttpURLConnection no
-                                // responde a interrupciones de hilo, así que la
-                                // única forma limpia de cancelar es revisar entre
-                                // trozos. Al cancelar se conserva el .parte para
-                                // reanudar en el próximo intento.
+                                // CANCELACIÓN y PAUSA cooperativas (Etapa 3):
+                                // HttpURLConnection no responde a interrupciones
+                                // de hilo, así que la única forma limpia es revisar
+                                // entre trozos. En ambos casos se conserva el .parte
+                                // para reanudar en el próximo intento. La diferencia:
+                                // cancelar saca el trabajo de la cola, pausar lo deja.
+                                if (shouldPause()) throw DownloadPausedException()
                                 if (shouldCancel()) throw IllegalStateException("Cancelada")
                                 val read = input.read(buffer)
                                 if (read < 0) break

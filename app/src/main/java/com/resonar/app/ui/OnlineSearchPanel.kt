@@ -266,10 +266,11 @@ private fun DownloadControl(track: OnlineTrack, viewModel: ResonarViewModel) {
                 onClick = { viewModel.downloadOnline(track) },
                 modifier = Modifier.size(32.dp),
             ) {
+                val paused = dl?.error == "En pausa"
                 Icon(
-                    painterResource(R.drawable.ic_download),
-                    contentDescription = "Descargar",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    painterResource(if (paused) R.drawable.ic_pause else R.drawable.ic_download),
+                    contentDescription = if (paused) "En pausa: tocar para reanudar" else "Descargar",
+                    tint = if (paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
             }

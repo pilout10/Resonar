@@ -188,6 +188,33 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
         )
+        // ETAPA 3 (parte 2): ajustes de las descargas de la búsqueda online.
+        PrefRow(R.drawable.ic_download, "Descargas solo por Wi-Fi", trailing = {
+            Switch(
+                checked = playback.wifiOnlyDownloads,
+                onCheckedChange = viewModel::setWifiOnlyDownloads,
+            )
+        })
+        Text(
+            "Si lo prendés, las descargas de la búsqueda NO arrancan con datos móviles: " +
+                "la app te avisa en el momento y la descarga queda sin iniciar.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+        )
+        PrefRow(R.drawable.ic_star, "Preguntar calidad en cada descarga", trailing = {
+            Switch(
+                checked = playback.askDownloadQuality,
+                onCheckedChange = viewModel::setAskDownloadQuality,
+            )
+        })
+        Text(
+            "Apagado, no se abre la hoja de calidades: se baja siempre la mejor versión que ofrece la fuente. " +
+                "Las fuentes que solo tienen una versión (YouTube, Audius) nunca preguntan igual.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+        )
         PrefRow(R.drawable.ic_chart, "Caché de streaming", trailing = {
             Switch(checked = playback.streamCache, onCheckedChange = viewModel::setStreamCache)
         })

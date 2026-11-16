@@ -70,6 +70,8 @@ data class PlaybackUiState(
     val autoDownload: Boolean = true,
     val streamCache: Boolean = true,
     val dataSaver: Boolean = false,
+    val wifiOnlyDownloads: Boolean = false,
+    val askDownloadQuality: Boolean = true,
     val eqAvailable: Boolean = false,
     val eqEnabled: Boolean = false,
     val eqPresetName: String = "Apagado",
@@ -104,6 +106,8 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
             autoDownload = store.isAutoDownload(),
             streamCache = store.isStreamCacheEnabled(),
             dataSaver = store.isDataSaver(),
+            wifiOnlyDownloads = store.isWifiOnlyDownloads(),
+            askDownloadQuality = store.isAskDownloadQuality(),
             // La foto ya guardada trae las bandas. Si no se lee al abrir,
             // el interruptor queda prendido y las opciones no aparecen
             // hasta apagarlo y prenderlo otra vez.
@@ -400,6 +404,18 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
     fun setDataSaver(enabled: Boolean) {
         store.setDataSaver(enabled)
         _state.update { it.copy(dataSaver = enabled) }
+    }
+
+    /** Descargas de búsqueda: bloquearlas con datos móviles si el usuario lo pide. */
+    fun setWifiOnlyDownloads(enabled: Boolean) {
+        store.setWifiOnlyDownloads(enabled)
+        _state.update { it.copy(wifiOnlyDownloads = enabled) }
+    }
+
+    /** Preguntar calidad en cada descarga, o tomar la mejor sin preguntar. */
+    fun setAskDownloadQuality(enabled: Boolean) {
+        store.setAskDownloadQuality(enabled)
+        _state.update { it.copy(askDownloadQuality = enabled) }
     }
 
     /**

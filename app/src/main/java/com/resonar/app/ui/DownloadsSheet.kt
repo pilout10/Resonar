@@ -53,10 +53,17 @@ fun DownloadStatusPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = jobs.filter { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.RUNNING }
+    val active = jobs.filter {
+        it.status == DownloadStatus.PENDING ||
+            it.status == DownloadStatus.RUNNING ||
+            it.status == DownloadStatus.PAUSED
+    }
     if (active.isEmpty()) return
-    val running = active.firstOrNull { it.status == DownloadStatus.RUNNING } ?: active.first()
+    val running = active.firstOrNull {
+        it.status == DownloadStatus.RUNNING || it.status == DownloadStatus.PAUSED
+    } ?: active.first()
     val pending = active.count { it.status == DownloadStatus.PENDING }
+    val paused = active.count { it.status == DownloadStatus.PAUSED }
 
     Surface(
         modifier = modifier
@@ -94,6 +101,13 @@ fun DownloadStatusPill(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (paused > 0) {
+                    Text(
+                        if (pending > 0) "· $paused en pausa" else "$paused en pausa",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.height(6.dp))
             val percent = running.percent
@@ -115,7 +129,11 @@ fun DownloadStatusPill(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (running.status == DownloadStatus.PENDING) "En cola" else "Descargando…",
+                    when {
+                        running.status == DownloadStatus.PAUSED -> "En pausa"
+                        running.status == DownloadStatus.PENDING -> "En cola"
+                        else -> "Descargando…"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -130,6 +148,8 @@ fun DownloadsSheet(
     jobs: List<DownloadJobUi>,
     onCancel: (String) -> Unit,
     onDismissItem: (String) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -171,7 +191,7 @@ fun DownloadsSheet(
                     )
                 } else {
                     Spacer(Modifier.height(4.dp))
-                    jobs.take(10).forEach { job -> DownloadJobRow(job, onCancel, onDismissItem) }
+                    jobs.take(10).forEach { job -> DownloadJobRow(job, onCancel, onDismissItem, onPause, onResume) }
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -184,8 +204,12 @@ private fun DownloadJobRow(
     job: DownloadJobUi,
     onCancel: (String) -> Unit,
     onDismissItem: (String) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
 ) {
-    val finished = job.status != DownloadStatus.PENDING && job.status != DownloadStatus.RUNNING
+    val finished = job.status != DownloadStatus.PENDING &&
+        job.status != DownloadStatus.RUNNING &&
+        job.status != DownloadStatus.PAUSED
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -229,6 +253,11 @@ private fun DownloadJobRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                DownloadStatus.PAUSED -> Text(
+                    "En pausa (el próximo toque retoma donde quedó)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 DownloadStatus.DONE -> Text(
                     "Listo",
                     style = MaterialTheme.typography.labelSmall,
@@ -246,24 +275,44 @@ private fun DownloadJobRow(
                 )
             }
         }
-        if (finished) {
-            // La X saca la fila terminada de la lista.
-            IconButton(onClick = { onDismissItem(job.id) }, modifier = Modifier.size(36.dp)) {
+        when (job.status) {
+            // Bajando: botón de pausa (conserva el .parte).
+            DownloadStatus.RUNNING -> IconButton(onClick = { onPause(job.id) }, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    painterResource(R.drawable.ic_clear),
-                    contentDescription = "Quitar de la lista",
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        } else {
-            // Cancelar una descarga activa: conserva el .parte para reanudar.
-            IconButton(onClick = { onCancel(job.id) }, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    painterResource(R.drawable.ic_clear),
-                    contentDescription = "Cancelar descarga",
-                    tint = MaterialTheme.colorScheme.error,
+                    painterResource(R.drawable.ic_pause),
+                    contentDescription = "Pausar descarga",
                     modifier = Modifier.size(18.dp),
                 )
+            }
+            // Pausada: botón de reanudar (vuelve a la cola y retoma).
+            DownloadStatus.PAUSED -> IconButton(onClick = { onResume(job.id) }, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_play),
+                    contentDescription = "Reanudar descarga",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            DownloadStatus.PENDING -> {
+                // En cola también se puede cancelar (solo saca el trabajo).
+                IconButton(onClick = { onCancel(job.id) }, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        painterResource(R.drawable.ic_clear),
+                        contentDescription = "Cancelar descarga",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            else -> {
+                // La X saca la fila terminada de la lista.
+                IconButton(onClick = { onDismissItem(job.id) }, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        painterResource(R.drawable.ic_clear),
+                        contentDescription = "Quitar de la lista",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
     }

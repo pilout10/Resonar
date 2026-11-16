@@ -13,11 +13,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.resonar.app.R
 import com.resonar.app.ResonarApp
+import com.resonar.app.data.DownloadPausedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -103,15 +105,29 @@ class DownloadService : Service() {
                     },
                     choice = job.option,
                     shouldCancel = { hub.isCancelled(job.id) },
+                    shouldPause = { hub.isPaused(job.id) },
                 )
                 hub.markDone(job.id)
                 // La descarga es parte de "Tu música": refrescar la biblioteca.
                 container.libraryRepository.refresh()
                 showFinished(job.track.title, error = null, cancelled = false)
+            } catch (e: DownloadPausedException) {
+                // El usuario pausó: el .parte queda; reanudar lo retoma.
+                hub.markPaused(job.id)
+                showFinished(job.track.title, error = null, cancelled = true, paused = true)
             } catch (e: Exception) {
                 if (hub.isCancelled(job.id)) {
                     hub.markCancelled(job.id)
                     showFinished(job.track.title, error = null, cancelled = true)
+                } else if (job.attempts < MAX_RETRIES && !hub.isPaused(job.id)) {
+                    // REINTENTO AUTOMÁTICO: el CDN de YouTube corta conexiones
+                    // seguido ("Connection reset") y una URL de stream puede
+                    // vencer (403). Esperar un poco y volver a intentar: el
+                    // .parte conserva el progreso y la URL se re-resuelve.
+                    val intento = job.attempts + 1
+                    hub.retry(job.id)
+                    showRetrying(job.track.title, intento)
+                    delay(3_000L)
                 } else {
                     hub.markError(job.id, e.message)
                     showFinished(job.track.title, error = e.message ?: "Error", cancelled = false)
@@ -144,9 +160,10 @@ class DownloadService : Service() {
     }
 
     /** Estado final: ya no es "pegada", se puede deslizar. */
-    private fun showFinished(title: String, error: String?, cancelled: Boolean) {
+    private fun showFinished(title: String, error: String?, cancelled: Boolean, paused: Boolean = false) {
         val text = when {
             error != null -> "No se pudo descargar: $title"
+            paused -> "Descarga en pausa: $title"
             cancelled -> "Descarga cancelada: $title"
             else -> "Descargado: $title"
         }
@@ -157,6 +174,17 @@ class DownloadService : Service() {
             .setAutoCancel(true)
             .setSilent(true)
         if (error != null) builder.setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        notifySafely(builder.build())
+    }
+
+    /** Reintento automático: avisa qué tema y qué intento va (sin sonido). */
+    private fun showRetrying(title: String, intento: Int) {
+        val builder = notificationBuilder()
+            .setContentTitle("Reintentando (intento $intento)")
+            .setContentText(title)
+            .setOngoing(true)
+            .setSilent(true)
+            .setProgress(0, 0, true)
         notifySafely(builder.build())
     }
 
@@ -192,5 +220,8 @@ class DownloadService : Service() {
     private companion object {
         const val CHANNEL_ID = "resonar_descargas"
         const val NOTIF_ID = 4201
+
+        /** Cuántas veces se reintenta solo antes de marcar ERROR (con 3 s entre intentos). */
+        const val MAX_RETRIES = 2
     }
 }

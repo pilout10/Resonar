@@ -293,7 +293,14 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                     job.id to DownloadUi(
                         percent = if (job.status == DownloadStatus.RUNNING) job.percent ?: -1 else null,
                         done = job.status == DownloadStatus.DONE,
-                        error = job.error ?: if (job.status == DownloadStatus.CANCELLED) "Cancelada" else null,
+                        // "En pausa" viaja como texto de estado (no como error de
+                        // verdad): la fila de búsqueda lo muestra como icono de
+                        // pausa y el toque vuelve a encolar (retoma el .parte).
+                        error = when (job.status) {
+                            DownloadStatus.CANCELLED -> "Cancelada"
+                            DownloadStatus.PAUSED -> "En pausa"
+                            else -> job.error
+                        },
                     )
                 }
             }
@@ -315,6 +322,23 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     /** Cancelar una descarga en curso (el .parte queda para reanudar). */
     fun cancelDownload(id: String) {
         vmScope.launch { container.downloadHub.requestCancel(id) }
+    }
+
+    /** Pausar: corta por el .parte y queda esperando; el próximo toque la reanuda. */
+    fun pauseDownload(id: String) {
+        vmScope.launch { container.downloadHub.requestPause(id) }
+    }
+
+    /** Reanudar una pausada: vuelve a la cola y el servicio la retoma donde quedó. */
+    fun resumeDownload(id: String) {
+        vmScope.launch {
+            val resumed = container.downloadHub.resume(id)
+            if (!resumed) return@launch
+            // El servicio pudo haber terminado mientras estaba pausada:
+            // startForegroundService es idempotente, lo re-leventa si hace falta.
+            val intent = android.content.Intent(getApplication(), com.resonar.app.download.DownloadService::class.java)
+            androidx.core.content.ContextCompat.startForegroundService(getApplication(), intent)
+        }
     }
 
     /** Sacar de la lista un trabajo terminado. */
@@ -340,7 +364,11 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         if (_onlineDownloads.value[id]?.let { !it.done && it.error == null } == true) return // ya bajando
         vmScope.launch {
             val options = runCatching { online.qualitiesFor(track) }.getOrDefault(emptyList())
-            if (options.size > 1) {
+            // Calidad predeterminada (Etapa 3 parte 2): si el usuario apagó
+            // "preguntar calidad", se toma la mejor opción disponible (la
+            // primera, que es la que la fuente prioriza) sin abrir la hoja.
+            val ask = playback.state.value.askDownloadQuality
+            if (options.size > 1 && ask) {
                 _qualitySheet.value = QualityChoice(track, options)
                 return@launch
             }
@@ -381,6 +409,13 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val metered = downloader.isOnMeteredNetwork()
+        // SOLO POR WI-FI (Etapa 3 parte 2): si el usuario lo pidió y hay datos
+        // móviles, la descarga NO arranca — se lo decimos en el momento y no
+        // se simula ningún progreso.
+        if (metered && playback.state.value.wifiOnlyDownloads) {
+            Toast.makeText(getApplication(), "Solo por Wi-Fi: la descarga no arrancó", Toast.LENGTH_LONG).show()
+            return
+        }
         vmScope.launch {
             val enqueued = container.downloadHub.enqueue(track, option)
             if (!enqueued) return@launch // ya estaba en cola o bajando
@@ -657,6 +692,8 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         if (enabled) syncer.refreshCountsAndNudge() else syncer.pause()
     }
     fun setStreamCache(enabled: Boolean) = playback.setStreamCache(enabled)
+    fun setWifiOnlyDownloads(enabled: Boolean) = playback.setWifiOnlyDownloads(enabled)
+    fun setAskDownloadQuality(enabled: Boolean) = playback.setAskDownloadQuality(enabled)
 
     /** Descarga manual: baja todo lo que falte aunque no haya WiFi. */
     fun startSyncNow() = container.librarySyncer.startNow()
