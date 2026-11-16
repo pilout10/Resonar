@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -314,11 +315,14 @@ fun PlayerScreen(
             }
         }
 
+        val outputContext = LocalContext.current
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { showOutput = true }) {
+            IconButton(onClick = {
+                if (!openSystemAudioOutput(outputContext)) showOutput = true
+            }) {
                 Icon(painterResource(R.drawable.ic_speaker), contentDescription = "Salida de audio")
             }
             Spacer(Modifier.weight(1f))
@@ -339,9 +343,33 @@ fun PlayerScreen(
         AlertDialog(
             onDismissRequest = { showOutput = false },
             title = { Text("Salida de audio") },
-            text = { Text("Reproduciendo en este dispositivo (${android.os.Build.MODEL}).") },
+            text = { Text("Reproduciendo en este dispositivo (${android.os.Build.MODEL}). En esta versión de Android no se pudo abrir el selector de salida.") },
             confirmButton = { TextButton(onClick = { showOutput = false }) { Text("Listo") } },
         )
     }
+}
+
+/**
+ * Selector del sistema para parlante, auriculares o Bluetooth.
+ * En este Motorola el panel de Ajustes ya no existe: lo abre SystemUI.
+ */
+private fun openSystemAudioOutput(context: android.content.Context): Boolean {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
+    val panel = runCatching {
+        val intent = android.content.Intent("android.settings.panel.action.MEDIA_OUTPUT")
+        if (context !is android.app.Activity) {
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }.isSuccess
+    if (panel) return true
+    return runCatching {
+        context.sendBroadcast(
+            android.content.Intent("com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG")
+                .setPackage("com.android.systemui")
+                .putExtra("package_name", context.packageName),
+        )
+        true
+    }.getOrDefault(false)
 }
 

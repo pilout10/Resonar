@@ -1,5 +1,6 @@
 package com.resonar.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -57,6 +57,17 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
     var qualitySheet by remember { mutableStateOf(false) }
     var libraryDialog by remember { mutableStateOf(false) }
     val systemTheme = playback.themeMode == "system"
+    // Este cartel se compone antes que el atrás de AppShell. Si Ajustes también
+    // registrara el suyo allá, el de afuera ganaría y cerraría toda la pantalla
+    // con la hoja de calidad todavía abierta.
+    BackHandler {
+        if (qualitySheet || libraryDialog) {
+            qualitySheet = false
+            libraryDialog = false
+        } else {
+            onBack()
+        }
+    }
 
     // Los diálogos de Material, puestos dentro de la animación de esta pantalla,
     // se ven pero no reciben el toque en el Motorola. El cartel va en la misma capa.
@@ -70,7 +81,7 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             .fillMaxSize()
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
+            .padding(bottom = rootNavigationBottom())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -92,7 +103,7 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
                 Column(Modifier.weight(1f)) {
                     Text("Tu biblioteca", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "${library.tracks.size} canciones en este dispositivo",
+                        "${trackCountLabel(library.tracks.size)} en este dispositivo",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -291,7 +302,7 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             CenterCard(onDismiss = { libraryDialog = false }) {
                 Text("Tu biblioteca", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "${library.tracks.size} canciones · ${library.artists.size} artistas · ${library.albums.size} álbumes. Nada sale de este dispositivo.",
+                    "${trackCountLabel(library.tracks.size)} · ${library.artists.size} artistas · ${library.albums.size} álbumes. Nada sale de este dispositivo.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -380,7 +391,7 @@ private fun BottomChoice(onDismiss: () -> Unit, content: @Composable () -> Unit)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding(),
+                .padding(bottom = rootNavigationBottom()),
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {

@@ -86,6 +86,13 @@ fun AppShell(viewModel: ResonarViewModel) {
                         Box(Modifier.weight(1f).statusBarsPadding()) {
                             MainContent(viewModel, tab, detail, library, wide = true)
                         }
+                        if (!overlay && !dockPlayer) {
+                            val downloadJobs by viewModel.downloadQueue.collectAsState()
+                            DownloadStatusPill(
+                                jobs = downloadJobs,
+                                onClick = viewModel::openDownloadsSheet,
+                            )
+                        }
                         if (!overlay && !dockPlayer && playback.currentTitle != null) {
                             MiniPlayer(
                                 playback,
@@ -104,6 +111,13 @@ fun AppShell(viewModel: ResonarViewModel) {
                         bottomBar = {
                             if (!overlay && !keyboardOpen) {
                                 Column(Modifier.navigationBarsPadding()) {
+                                    // Píldora "Descargando ahora": visible en
+                                    // todas las pestañas mientras baja algo.
+                                    val downloadJobs by viewModel.downloadQueue.collectAsState()
+                                    DownloadStatusPill(
+                                        jobs = downloadJobs,
+                                        onClick = viewModel::openDownloadsSheet,
+                                    )
                                     if (playback.currentTitle != null) {
                                         MiniPlayer(
                                             playback,
@@ -161,6 +175,22 @@ fun AppShell(viewModel: ResonarViewModel) {
             DeleteConfirmDialog(viewModel, pendingDelete!!, viewModel::cancelDelete)
         }
 
+        val pendingPlaylistId by viewModel.pendingPlaylistDelete.collectAsState()
+        if (pendingPlaylistId != null) {
+            val playlistTitle = viewModel.playlistName(pendingPlaylistId!!)
+            AlertDialog(
+                onDismissRequest = viewModel::cancelDeletePlaylist,
+                title = { Text("Eliminar playlist") },
+                text = { Text("¿Eliminar «$playlistTitle»? Las canciones no se borran del teléfono.") },
+                confirmButton = {
+                    TextButton(onClick = viewModel::confirmDeletePlaylist) { Text("Eliminar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::cancelDeletePlaylist) { Text("Cancelar") }
+                },
+            )
+        }
+
         val versionSheet by viewModel.versionSheet.collectAsState()
         if (versionSheet != null) {
             OnlineVersionSheet(
@@ -184,6 +214,20 @@ fun AppShell(viewModel: ResonarViewModel) {
             )
         }
 
+        // HOJA "DESCARGANDO AHORA": la cola completa, con cancelar por fila.
+        // Va a nivel AppShell (patrón probado en el Motorola: los diálogos
+        // dentro de capas animadas no reciben el toque).
+        val showDownloadsSheet by viewModel.showDownloadsSheet.collectAsState()
+        if (showDownloadsSheet) {
+            val downloadJobs by viewModel.downloadQueue.collectAsState()
+            DownloadsSheet(
+                jobs = downloadJobs,
+                onCancel = viewModel::cancelDownload,
+                onDismissItem = viewModel::dismissDownload,
+                onClose = viewModel::closeDownloadsSheet,
+            )
+        }
+
         // Fuera de la animación de Configuración: ahí el botón sí recibe el toque.
         val showLanguageNote by viewModel.showLanguageNote.collectAsState()
         if (showLanguageNote) {
@@ -191,14 +235,18 @@ fun AppShell(viewModel: ResonarViewModel) {
         }
 
         when {
+            showDownloadsSheet -> BackHandler { viewModel.closeDownloadsSheet() }
             qualitySheet != null -> BackHandler { viewModel.closeQualitySheet() }
             versionSheet != null -> BackHandler { viewModel.closeVersionSheet() }
+            pendingPlaylistId != null -> BackHandler { viewModel.cancelDeletePlaylist() }
             pendingDelete != null -> BackHandler { viewModel.cancelDelete() }
             showLanguageNote -> BackHandler { viewModel.closeLanguageNote() }
             showQueue -> BackHandler { viewModel.closeQueue() }
             showEqualizer -> BackHandler { viewModel.closeEqualizer() }
-            showSettings -> BackHandler { viewModel.closeSettings() }
             fullPlayer -> BackHandler { viewModel.closePlayer() }
+            // Ajustes cierra su hoja de calidad o la pantalla. Si acá también
+            // hubiera un BackHandler, se registraría después y ganaría siempre.
+            showSettings -> Unit
             detail != null -> BackHandler { viewModel.closeDetail() }
         }
     }

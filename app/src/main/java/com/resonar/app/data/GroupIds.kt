@@ -31,4 +31,24 @@ object GroupIds {
 
     /** Id del grupo de un álbum (por nombre, sin distinguir mayúsculas). */
     fun album(name: String): Long = of("album|${name.trim().lowercase()}")
+
+    /**
+     * Nombre visible y id del álbum.
+     * La carpeta ("Descargas") no es un álbum. Si el archivo no trae la etiqueta,
+     * el tema queda solo, con su título, para no juntar artistas distintos.
+     */
+    fun albumIdentity(tagged: String, folder: String, fileKey: String, fallbackTitle: String): Pair<String, Long> {
+        val clean = tagged.trim()
+        val real = clean.takeIf {
+            it.isNotBlank() &&
+                !it.equals("<sin álbum>", ignoreCase = true) &&
+                !it.equals(folder.trim(), ignoreCase = true)
+        }
+        return if (real != null) {
+            real to album(real)
+        } else {
+            val title = fallbackTitle.trim().ifBlank { fileKey }
+            title to album("file|$fileKey")
+        }
+    }
 }

@@ -52,7 +52,7 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
     val subtitle = when (detail) {
         is LibraryDetail.Album -> library.albums.firstOrNull { it.id == detail.id }?.artistName.orEmpty()
         is LibraryDetail.Genre -> "Género"
-        else -> "${tracks.size} canciones"
+        else -> trackCountLabel(tracks.size)
     }
     val openCollection = detail as? LibraryDetail.Collection
     val canRemove = openCollection != null &&
@@ -128,7 +128,7 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
         }
         if (canDelete) {
             TextButton(
-                onClick = { openCollection?.let { viewModel.deletePlaylist(it.key) } },
+                onClick = { openCollection?.let { viewModel.requestDeletePlaylist(it.key) } },
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) { Text("Eliminar playlist") }
         }

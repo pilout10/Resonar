@@ -97,7 +97,13 @@ class FolderTreeScanner(private val app: Context) {
                     val finalArtist = tags.artist
                         ?.takeIf { it.isNotBlank() && !it.equals("<unknown>", ignoreCase = true) }
                         ?: artist
-                    val finalAlbum = tags.album?.takeIf { it.isNotBlank() } ?: albumName
+                    val genre = cleanGenre(tags.genre)
+                    val (finalAlbum, albumId) = GroupIds.albumIdentity(
+                        tagged = tags.album.orEmpty(),
+                        folder = albumName,
+                        fileKey = fileLabel,
+                        fallbackTitle = finalTitle,
+                    )
                     out.add(
                         LocalTrack(
                             id = stableId(childId),
@@ -105,7 +111,7 @@ class FolderTreeScanner(private val app: Context) {
                             title = finalTitle,
                             artist = finalArtist,
                             album = finalAlbum,
-                            albumId = GroupIds.album(finalAlbum),
+                            albumId = albumId,
                             artistId = GroupIds.artist(finalArtist),
                             durationMs = tags.durationMs,
                             trackNo = 0,
@@ -113,8 +119,8 @@ class FolderTreeScanner(private val app: Context) {
                             fileName = fileLabel,
                             sourceRank = 0,
                             year = 0,
-                            genre = "",
-                            searchBlob = LocalLibraryRepository.normalizeForSearch("$finalTitle $finalArtist $finalAlbum $name"),
+                            genre = genre,
+                            searchBlob = LocalLibraryRepository.normalizeForSearch("$finalTitle $finalArtist $finalAlbum $name $genre"),
                             artUrl = folderArtUri,
                         ),
                     )
@@ -149,6 +155,7 @@ class FolderTreeScanner(private val app: Context) {
                     title = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE),
                     artist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST),
                     album = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                    genre = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_GENRE),
                     durationMs = retriever.extractMetadata(
                         android.media.MediaMetadataRetriever.METADATA_KEY_DURATION,
                     )?.toLongOrNull()?.takeIf { it > 0 } ?: 0L,
@@ -295,8 +302,16 @@ private data class AudioTags(
     val title: String? = null,
     val artist: String? = null,
     val album: String? = null,
+    val genre: String? = null,
     val durationMs: Long = 0L,
 )
+
+private fun cleanGenre(raw: String?): String {
+    val value = raw?.trim().orEmpty()
+    if (value.isBlank()) return ""
+    if (value.equals("<unknown>", true) || value.equals("unknown", true)) return ""
+    return value
+}
 
 /** Un hijo de una carpeta (documento del árbol SAF). */
 private data class Entry(val id: String, val name: String, val mime: String)

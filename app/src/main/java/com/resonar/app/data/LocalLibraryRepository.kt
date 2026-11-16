@@ -218,7 +218,8 @@ class LocalLibraryRepository(
     /**
      * Entrada del índice de descargas ONLINE → LocalTrack (aparece en "Tu música").
      * Ids sintéticos negativos estables (no pisan ids de MediaStore). El título
-     * y el artista son los del índice; el álbum = "Descargas".
+     * y el artista son los del índice. Sin etiqueta de álbum, el tema no se agrupa
+     * bajo la carpeta Descargas.
      */
     private fun entryToTrack(entry: OnlineDownloader.Entry): LocalTrack? {
         val downloader = downloads ?: return null
@@ -226,13 +227,14 @@ class LocalLibraryRepository(
         if (!file.exists() || file.length() < 1024) return null
         val title = entry.title.trim().ifBlank { file.name }
         val artist = entry.artist.trim().ifBlank { "<Sin artista>" }
+        val (album, albumId) = GroupIds.albumIdentity("", "", file.name, title)
         return LocalTrack(
             id = stableNegativeId("online|${entry.mediaId}"),
             uri = android.net.Uri.fromFile(file).toString(),
             title = title,
             artist = artist,
-            album = "Descargas",
-            albumId = GroupIds.album("Descargas"),
+            album = album,
+            albumId = albumId,
             artistId = GroupIds.artist(artist),
             durationMs = entry.durationMs ?: 0L,
             trackNo = 0,
@@ -372,7 +374,7 @@ class LocalLibraryRepository(
                     title = TrackNames.stripMarker(rawTitle)
                     artist = tagArtist.ifBlank { fileArtist ?: "<Sin artista>" }
                 }
-                val album = tagAlbum.ifBlank { folder.ifBlank { "<Sin álbum>" } }
+                val (album, albumGroupId) = GroupIds.albumIdentity(tagAlbum, folder, fileName, title)
                 val genre = cleanGenre(genres[id])
 
                 val uriStr = collection.buildUpon()
@@ -386,7 +388,7 @@ class LocalLibraryRepository(
                         title = title,
                         artist = artist,
                         album = album,
-                        albumId = GroupIds.album(album),
+                        albumId = albumGroupId,
                         albumArtId = cursor.getLong(colAlbumId),
                         artistId = GroupIds.artist(artist),
                         durationMs = durationMs,
@@ -419,7 +421,25 @@ class LocalLibraryRepository(
             .toMap()
         return fromTree.map { item ->
             val known = byName[item.fileName.lowercase()]
-            val base = if (known != null) known.copy(sourceRank = 0) else item
+            // El escáner lee el archivo. MediaStore a veces pone la carpeta como álbum
+            // y deja el género vacío: si el archivo trae etiqueta, esa manda.
+            val albumSource = when {
+                known == null -> item
+                !isUntaggedAlbum(item) -> item
+                !isUntaggedAlbum(known) -> known
+                else -> item
+            }
+            val genre = item.genre.ifBlank { known?.genre.orEmpty() }
+            val carrier = known ?: item
+            val base = carrier.copy(
+                sourceRank = 0,
+                album = albumSource.album,
+                albumId = albumSource.albumId,
+                genre = genre,
+                searchBlob = normalizeForSearch(
+                    "${carrier.title} ${carrier.artist} ${albumSource.album} ${item.folder} ${item.fileName} $genre",
+                ),
+            )
             // Prioridad: portada de la fuente en línea > carátula de carpeta > MediaStore.
             val art = base.artUrl
                 ?: artByFile[item.fileName.lowercase()]
@@ -492,6 +512,10 @@ class LocalLibraryRepository(
         }
         return map
     }
+
+    /** Álbumes inventados a partir del nombre de archivo, no de una etiqueta. */
+    private fun isUntaggedAlbum(track: LocalTrack): Boolean =
+        track.albumId == GroupIds.album("file|${track.fileName}")
 
     private fun cleanGenre(raw: String?): String {
         val value = raw?.trim().orEmpty()

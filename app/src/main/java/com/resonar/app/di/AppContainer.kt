@@ -28,6 +28,12 @@ class AppContainer(appContext: Context) {
     val onlineDownloader: OnlineDownloader = OnlineDownloader(appContext)
 
     /**
+     * COLA de descargas compartida por pantalla y servicio (Etapa 3). La
+     * descarga en sí la hace DownloadService; esto es solo el estado.
+     */
+    val downloadHub: com.resonar.app.data.DownloadHub = com.resonar.app.data.DownloadHub()
+
+    /**
      * Escáner/índice de la música local. Las descargas online son parte
      * de la biblioteca: se fusionan en cada escaneo.
      */

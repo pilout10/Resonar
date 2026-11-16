@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,12 +25,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -211,33 +212,25 @@ fun PlaylistsPage(viewModel: ResonarViewModel) {
                 onClick = { viewModel.openCollection(playlist.id) },
                 onPlay = { viewModel.playCollection(playlist.id) },
                 onShuffle = { viewModel.playCollection(playlist.id, true) },
-                onDelete = { viewModel.deletePlaylist(playlist.id) },
+                onDelete = { viewModel.requestDeletePlaylist(playlist.id) },
             )
         }
     }
 
     if (creating) {
-        AlertDialog(
-            onDismissRequest = { creating = false },
-            title = { Text("Nueva playlist") },
-            text = {
-                TextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    singleLine = true,
-                    placeholder = { Text("Nombre") },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.createPlaylist(name)
+        PlaylistNameDialog(
+            title = "Nueva playlist",
+            name = name,
+            onName = { name = it },
+            confirmLabel = "Crear",
+            onConfirm = {
+                if (viewModel.createPlaylist(name) != null) {
                     name = ""
                     creating = false
-                }) { Text("Crear") }
+                }
             },
-            dismissButton = {
-                TextButton(onClick = { creating = false }) { Text("Cancelar") }
-            },
+            dismissLabel = "Cancelar",
+            onDismiss = { creating = false },
         )
     }
 }
@@ -272,7 +265,7 @@ private fun PlaylistRow(
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "$count canciones",
+                trackCountLabel(count),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -285,7 +278,7 @@ private fun PlaylistRow(
                 DropdownMenuItem(text = { Text("Reproducir") }, onClick = { menu = false; onPlay() })
                 DropdownMenuItem(text = { Text("Aleatorio") }, onClick = { menu = false; onShuffle() })
                 if (onDelete != null) {
-                    DropdownMenuItem(text = { Text("Eliminar playlist") }, onClick = { menu = false; onDelete() })
+                    DropdownMenuItem(text = { Text("Eliminar playlist") }, onClick = { menu = false; onDelete?.invoke() })
                 }
             }
         }
@@ -333,7 +326,7 @@ private fun ArtistPage(viewModel: ResonarViewModel) {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                    Text("${artist.trackCount} canciones", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(trackCountLabel(artist.trackCount), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(painterResource(R.drawable.ic_chevron), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -353,7 +346,7 @@ private fun SongPage(viewModel: ResonarViewModel) {
                 if (library.musicFolderLabel.isBlank()) {
                     "Todo el teléfono, menos audios de WhatsApp."
                 } else {
-                    "Carpeta ${library.musicFolderLabel}."
+                    "Carpeta ${library.musicFolderLabel}"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -367,7 +360,7 @@ private fun SongPage(viewModel: ResonarViewModel) {
             ) {
                 Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Aleatorio · ${library.tracks.size} canciones")
+                Text("Aleatorio · ${trackCountLabel(library.tracks.size)}")
             }
         }
         items(library.tracks, key = { it.id }) { track ->
@@ -393,45 +386,101 @@ fun PlaylistPickerDialog(viewModel: ResonarViewModel, trackId: Long, onDismiss: 
     val user by viewModel.userState.collectAsState()
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (creating) "Nueva playlist" else "Agregar a playlist") },
-        text = {
-            if (creating) {
-                TextField(value = name, onValueChange = { name = it }, singleLine = true, placeholder = { Text("Nombre") })
-            } else {
-                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    if (user.playlists.isEmpty()) {
-                        Text("Todavía no tenés playlists. Creá una y sumamos esta canción.")
-                    }
-                    user.playlists.forEach { playlist ->
-                        Text(
-                            playlist.name,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.addToPlaylist(playlist.id, trackId)
-                                    onDismiss()
-                                }
-                                .padding(vertical = 12.dp),
-                        )
-                    }
+    PlaylistFormDialog(onDismiss = onDismiss) {
+        Text(
+            if (creating) "Nueva playlist" else "Agregar a playlist",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (creating) {
+            TextField(value = name, onValueChange = { name = it }, singleLine = true, placeholder = { Text("Nombre") })
+        } else {
+            Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                if (user.playlists.isEmpty()) {
+                    Text("Todavía no tenés playlists. Creá una y sumamos esta canción.")
+                }
+                user.playlists.forEach { playlist ->
+                    Text(
+                        playlist.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.addToPlaylist(playlist.id, trackId)
+                                onDismiss()
+                            }
+                            .padding(vertical = 12.dp),
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (creating) {
-                    val id = viewModel.createPlaylist(name)
-                    if (id != null) viewModel.addToPlaylist(id, trackId)
-                    onDismiss()
-                } else {
-                    creating = true
-                }
-            }) { Text(if (creating) "Crear" else "Nueva") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
-    )
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) { Text("Cerrar") }
+            TextButton(
+                onClick = {
+                    if (creating) {
+                        val id = viewModel.createPlaylist(name)
+                        if (id != null) {
+                            viewModel.addToPlaylist(id, trackId)
+                            onDismiss()
+                        }
+                    } else {
+                        creating = true
+                    }
+                },
+                enabled = !creating || name.isNotBlank(),
+            ) { Text(if (creating) "Crear" else "Nueva") }
+        }
+    }
+}
+
+/** Nombre de playlist. El teclado empuja el cartel: Crear no queda tapado. */
+@Composable
+private fun PlaylistNameDialog(
+    title: String,
+    name: String,
+    onName: (String) -> Unit,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    dismissLabel: String,
+    onDismiss: () -> Unit,
+) {
+    PlaylistFormDialog(onDismiss = onDismiss) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        TextField(value = name, onValueChange = onName, singleLine = true, placeholder = { Text("Nombre") })
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) { Text(dismissLabel) }
+            TextButton(onClick = onConfirm, enabled = name.isNotBlank()) { Text(confirmLabel) }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistFormDialog(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(20.dp)) { content() }
+            }
+        }
+    }
 }
 
 private fun absHash(value: String): Int = value.hashCode().let { if (it < 0) -it else it }

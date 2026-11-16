@@ -12,6 +12,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.resonar.app.ResonarApp
 import com.resonar.app.data.LibraryState
+import com.resonar.app.data.DownloadStatus
+import com.resonar.app.data.DownloadJobUi
 import com.resonar.app.data.LibrarySyncer
 import com.resonar.app.data.LocalLibraryRepository
 import com.resonar.app.data.LocalTrack
@@ -34,10 +36,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -180,8 +184,10 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 _onlineState.value = OnlineSearchState(query = rawQuery, offline = true)
                 return@launch
             }
-            val outcome: FederatedResults = runCatching { online.federatedSearch(rawQuery) }
-                .getOrDefault(FederatedResults(emptyList(), emptyList()))
+            val videosOnly = _ytFilter.value == 1
+            val outcome: FederatedResults = runCatching {
+                online.federatedSearch(rawQuery, videosOnly = videosOnly)
+            }.getOrDefault(FederatedResults(emptyList(), emptyList()))
             _onlineState.value = OnlineSearchState(
                 query = rawQuery,
                 results = outcome.results,
@@ -245,7 +251,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
             // Copia local primero: descargar sirve para algo (offline, sin esperas).
             val local = container.onlineDownloader.localUriFor(track)
             if (local != null) {
-                playback.playQueue(listOf(track.toMediaItem(local)), 0)
+                playback.playKeepingQueue(track.toMediaItem(local))
                 openPlayer()
                 return@launch
             }
@@ -262,7 +268,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
                 ).show()
                 return@launch
             }
-            playback.playQueue(listOf(track.toMediaItem(handle.uri)), 0)
+            playback.playKeepingQueue(track.toMediaItem(handle.uri))
             openPlayer()
         }
     }
@@ -276,11 +282,45 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         val error: String? = null,
     )
 
-    private val _onlineDownloads = MutableStateFlow<Map<String, DownloadUi>>(emptyMap())
-    val onlineDownloads: StateFlow<Map<String, DownloadUi>> = _onlineDownloads.asStateFlow()
+    private val _onlineDownloads: StateFlow<Map<String, DownloadUi>> =
+        container.downloadHub.jobs
+            // El estado de las filas de búsqueda sale de la COLA compartida
+            // (DownloadHub): así el icono de cada tema refleja lo que el
+            // servicio está haciendo, aunque la app se haya cerrado y
+            // reabierto mientras baja.
+            .map { jobs ->
+                jobs.associate { job ->
+                    job.id to DownloadUi(
+                        percent = if (job.status == DownloadStatus.RUNNING) job.percent ?: -1 else null,
+                        done = job.status == DownloadStatus.DONE,
+                        error = job.error ?: if (job.status == DownloadStatus.CANCELLED) "Cancelada" else null,
+                    )
+                }
+            }
+            .stateIn(vmScope, SharingStarted.Eagerly, emptyMap())
+    val onlineDownloads: StateFlow<Map<String, DownloadUi>> = _onlineDownloads
 
     private val _downloadedIds = MutableStateFlow(container.onlineDownloader.downloadedIds())
     val downloadedIds: StateFlow<Set<String>> = _downloadedIds.asStateFlow()
+
+    /** La cola completa, para el panel "Descargando ahora". */
+    val downloadQueue: StateFlow<List<com.resonar.app.data.DownloadJobUi>> = container.downloadHub.jobs
+
+    /** Panel "Descargando ahora": abierto / cerrado. */
+    private val _showDownloadsSheet = MutableStateFlow(false)
+    val showDownloadsSheet: StateFlow<Boolean> = _showDownloadsSheet.asStateFlow()
+    fun openDownloadsSheet() { _showDownloadsSheet.value = true }
+    fun closeDownloadsSheet() { _showDownloadsSheet.value = false }
+
+    /** Cancelar una descarga en curso (el .parte queda para reanudar). */
+    fun cancelDownload(id: String) {
+        vmScope.launch { container.downloadHub.requestCancel(id) }
+    }
+
+    /** Sacar de la lista un trabajo terminado. */
+    fun dismissDownload(id: String) {
+        vmScope.launch { container.downloadHub.remove(id) }
+    }
 
     /**
      * Descarga un resultado al teléfono. Una a la vez (el descargador tiene
@@ -325,9 +365,15 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     private val _qualitySheet = MutableStateFlow<QualityChoice?>(null)
     val qualitySheet: StateFlow<QualityChoice?> = _qualitySheet.asStateFlow()
 
-    /** La descarga en sí (ya con la calidad elegida, si la hubo). */
+    /**
+     * La descarga en sí (ya con la calidad elegida, si la hubo).
+     *
+     * ETAPA 3: acá NO se descarga. Se encola en el DownloadHub y se arranca
+     * el DownloadService (servicio en primer plano): es él quien baja, con
+     * su notificación de progreso. Por eso la descarga sigue cuando el
+     * usuario sale de la app — antes moría con el ViewModel.
+     */
     private fun startDownload(track: OnlineTrack, option: AudioOption?) {
-        val id = track.mediaId
         val downloader = container.onlineDownloader
         val spaceBlocker = downloader.spaceBlocker()
         if (spaceBlocker != null) {
@@ -335,34 +381,31 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val metered = downloader.isOnMeteredNetwork()
-        _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(percent = null))
         vmScope.launch {
-            try {
-                if (metered) {
-                    Toast.makeText(getApplication(), "Descargando con datos móviles…", Toast.LENGTH_SHORT).show()
+            val enqueued = container.downloadHub.enqueue(track, option)
+            if (!enqueued) return@launch // ya estaba en cola o bajando
+            if (metered) {
+                Toast.makeText(getApplication(), "Descargando con datos móviles…", Toast.LENGTH_SHORT).show()
+            }
+            // El servicio consume la cola y publica el progreso. NOTA: la
+            // notificación de Android 13+ requiere el permiso POST_NOTIFICATIONS,
+            // que la app ya pide al arrancar.
+            val intent = android.content.Intent(getApplication(), com.resonar.app.download.DownloadService::class.java)
+            androidx.core.content.ContextCompat.startForegroundService(getApplication(), intent)
+        }
+    }
+
+    init {
+        // Cuando la cola reporta un trabajo terminado, "Tu música" y el set
+        // de descargados cambian: se recalculan desde el índice (la verdad).
+        vmScope.launch {
+            container.downloadHub.jobs.collect { jobs ->
+                val freshDone = jobs.any {
+                    it.status == DownloadStatus.DONE && it.id !in _downloadedIds.value
                 }
-                downloader.download(
-                    track,
-                    resolve = { online.resolveStream(it) },
-                    onProgress = { percent ->
-                        _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(percent = percent))
-                    },
-                    choice = option,
-                )
-                // El índice ya tiene la entrada: se recalcula desde ahí (es la verdad).
-                _downloadedIds.value = container.onlineDownloader.downloadedIds()
-                _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(done = true))
-                // La descarga es parte de "Tu música": refrescar la biblioteca.
-                container.libraryRepository.refresh()
-                Toast.makeText(getApplication(), "Descargado: ${track.title}", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Log.w("ResonarDown", "Descarga falló: ${e.message}")
-                _onlineDownloads.value = _onlineDownloads.value + (id to DownloadUi(error = e.message))
-                Toast.makeText(
-                    getApplication(),
-                    "No se pudo descargar: ${e.message}",
-                    Toast.LENGTH_LONG,
-                ).show()
+                if (freshDone) {
+                    _downloadedIds.value = container.onlineDownloader.downloadedIds()
+                }
             }
         }
     }
@@ -563,6 +606,26 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         if (open is LibraryDetail.Collection && open.key == id) _detail.value = null
     }
 
+    private val _pendingPlaylistDelete = MutableStateFlow<String?>(null)
+    val pendingPlaylistDelete: StateFlow<String?> = _pendingPlaylistDelete.asStateFlow()
+
+    fun requestDeletePlaylist(id: String) {
+        _pendingPlaylistDelete.value = id
+    }
+
+    fun cancelDeletePlaylist() {
+        _pendingPlaylistDelete.value = null
+    }
+
+    fun confirmDeletePlaylist() {
+        val id = _pendingPlaylistDelete.value ?: return
+        _pendingPlaylistDelete.value = null
+        deletePlaylist(id)
+    }
+
+    fun playlistName(id: String): String =
+        userLibrary.state.value.playlists.firstOrNull { it.id == id }?.name ?: "esta playlist"
+
     fun addToPlaylist(playlistId: String, trackId: Long) = userLibrary.addToPlaylist(playlistId, trackId)
 
     fun removeFromOpenCollection(trackId: Long) {
@@ -652,7 +715,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (onlineDownloadId != null) {
                 _downloadedIds.value = _downloadedIds.value - onlineDownloadId
-                _onlineDownloads.value = _onlineDownloads.value - onlineDownloadId
+                vmScope.launch { container.downloadHub.remove(onlineDownloadId) }
             }
             finishDelete(track, onlineDownloadId)
         }
@@ -668,7 +731,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
         if (!deleted) return
         if (onlineId != null) {
             _downloadedIds.value = _downloadedIds.value - onlineId
-            _onlineDownloads.value = _onlineDownloads.value - onlineId
+            vmScope.launch { container.downloadHub.remove(onlineId) }
         }
         vmScope.launch { finishDelete(track ?: return@launch, onlineId) }
     }

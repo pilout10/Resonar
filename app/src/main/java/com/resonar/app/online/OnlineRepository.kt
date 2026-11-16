@@ -52,16 +52,18 @@ class OnlineRepository(private val app: Context) {
 
     // ── Búsqueda federada ───────────────────────────────────────────────
 
-    suspend fun federatedSearch(query: String, page: Int = 0): FederatedResults {
+    suspend fun federatedSearch(query: String, page: Int = 0, videosOnly: Boolean = false): FederatedResults {
+        // "Videos" es otra consulta: no puede reusar el caché de canciones.
+        val cacheQuery = if (videosOnly) "${query.trim()}|videos" else query
         // Página 0: se sirve del caché si está fresco (y sin red hace falta).
         if (page == 0) {
-            val cached = runCatching { cache.get(query) }.getOrNull()
+            val cached = runCatching { cache.get(cacheQuery) }.getOrNull()
             if (cached != null && cached.isNotEmpty()) {
-                android.util.Log.i("ResonarOnline", "Caché: '${query.trim()}' (${cached.size} resultados)")
+                android.util.Log.i("ResonarOnline", "Caché: '${cacheQuery.trim()}' (${cached.size} resultados)")
                 return FederatedResults(dedupe(cached), emptyList())
             }
         }
-        val sources = registry.enabledSources()
+        val sources = registry.enabledSources().filter { !videosOnly || it.id == "youtube" }
         if (sources.isEmpty()) return FederatedResults(emptyList(), emptyList())
         val semaphore = Semaphore(3) // máximo 3 pedidos en vuelo: red y RAM contenidas
 
@@ -105,7 +107,7 @@ class OnlineRepository(private val app: Context) {
         // Solo se cachea una búsqueda COMPLETA: si una fuente falló, los
         // resultados están incompletos y es mejor volver a consultar.
         if (page == 0 && failed.isEmpty() && flat.isNotEmpty()) {
-            runCatching { cache.put(query, flat) }
+            runCatching { cache.put(cacheQuery, flat) }
         }
         return FederatedResults(dedupe(flat), failed)
     }

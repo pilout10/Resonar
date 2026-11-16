@@ -83,8 +83,11 @@ fun SearchTab(viewModel: ResonarViewModel, wide: Boolean) {
 
     val popular = remember(library.artists) { library.artists.sortedByDescending { it.trackCount }.take(6) }
     val genreNames = remember(library.tracks, expandGenres) {
-        val curated = MusicCollections.curated.map { it.first }
-        if (expandGenres) curated + MusicCollections.extraGenres(library.tracks) else curated.take(6)
+        val curated = MusicCollections.curated.map { it.first }.filter { name ->
+            MusicCollections.tracksForGenre(library.tracks, name).isNotEmpty()
+        }
+        val extra = MusicCollections.extraGenres(library.tracks)
+        if (expandGenres) curated + extra else (curated + extra).take(6)
     }
     val normalized = remember(query) { LocalLibraryRepository.normalizeForSearch(query).trim() }
     val songs = remember(library.tracks, normalized) {
@@ -141,11 +144,11 @@ fun SearchTab(viewModel: ResonarViewModel, wide: Boolean) {
 
         if (searchMode == 1) {
             // Búsqueda federada: resultados de las fuentes de la nube.
-            OnlineSearchPanel(viewModel, playback)
+            OnlineSearchPanel(viewModel, playback, Modifier.weight(1f))
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 24.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
             ) {
             if (normalized.isEmpty()) {
                 if (popular.isNotEmpty()) {
@@ -182,6 +185,15 @@ fun SearchTab(viewModel: ResonarViewModel, wide: Boolean) {
                         "Explorar por género",
                         if (expandGenres) "Ver menos" else "Ver todo",
                     ) { expandGenres = !expandGenres }
+                }
+                if (genreNames.isEmpty()) {
+                    item {
+                        Text(
+                            "Ninguna canción tiene género en el archivo.",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 genreNames.chunked(2).forEach { row ->
                     item {
@@ -240,7 +252,7 @@ fun SearchTab(viewModel: ResonarViewModel, wide: Boolean) {
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                                Text("${artist.trackCount} canciones", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(trackCountLabel(artist.trackCount), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -303,7 +315,7 @@ private fun GenreCard(name: String, count: Int, modifier: Modifier, onClick: () 
         Column(Modifier.align(Alignment.BottomStart)) {
             Text(name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                if (count == 0) "Sin etiqueta" else "$count canciones",
+                trackCountLabel(count),
                 color = Color.White.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.bodySmall,
             )

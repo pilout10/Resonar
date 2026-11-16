@@ -38,6 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -516,4 +520,27 @@ fun ScanningLibrary() {
 fun formatClock(ms: Long): String {
     val safe = ms.coerceAtLeast(0L) / 1000
     return "%d:%02d".format(safe / 60, safe % 60)
+}
+
+/** Duración de una fila. Sin dato, o en cero, no se muestra un guion suelto. */
+fun formatDuration(ms: Long?): String {
+    if (ms == null || ms <= 0L) return "–:–"
+    return formatClock(ms)
+}
+
+/** "1 canción" y "2 canciones". */
+fun trackCountLabel(count: Int): String = if (count == 1) "1 canción" else "$count canciones"
+
+/**
+ * Alto real de la barra de navegación del sistema.
+ * El Scaffold se come los insets de Compose, y un overlay hermano ve 0:
+ * Ajustes quedaba debajo de atrás / inicio / recientes.
+ */
+@Composable
+fun rootNavigationBottom(): Dp {
+    val view = LocalView.current
+    val px = ViewCompat.getRootWindowInsets(view)
+        ?.getInsets(WindowInsetsCompat.Type.navigationBars())
+        ?.bottom ?: 0
+    return with(LocalDensity.current) { px.toDp() }
 }

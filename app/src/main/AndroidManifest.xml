@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Etapa 3: el servicio de descargas es de tipo dataSync (bajar archivos). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Permite pedirle al sistema, con diálogo del usuario, poner la app "Sin restricciones" de batería.
     -->
@@ -71,5 +73,14 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+
+        <!-- ── Servicio de descargas (Etapa 3) ──────────────────────────────
+             foregroundServiceType="dataSync": así el sistema sabe que baja
+             archivos. Con su notificación de progreso en primer plano, la
+             descarga sigue aunque el usuario salga de la app. -->
+        <service
+            android:name=".download.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

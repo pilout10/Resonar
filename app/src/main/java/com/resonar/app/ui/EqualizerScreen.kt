@@ -9,8 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,7 +46,7 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
+            .padding(bottom = rootNavigationBottom())
             .padding(horizontal = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -71,31 +71,32 @@ fun EqualizerScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBa
         )
         Spacer(Modifier.height(16.dp))
         if (playback.eqEnabled || playback.eqAvailable) {
+            val on = playback.eqEnabled
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                PresetChip("Apagado", playback.eqPresetName == "Apagado" || !playback.eqEnabled) {
+                PresetChip("Apagado", playback.eqPresetName == "Apagado" || !on) {
                     viewModel.setEqPreset("Apagado")
                 }
-                listOf("Plano", "Más graves", "Voces", "Brillo").forEach { name ->
-                    PresetChip(name, playback.eqEnabled && playback.eqPresetName == name) {
+                listOf("Plano", "Más graves", "Voces", "Brillo", "Personalizado").forEach { name ->
+                    PresetChip(name, on && playback.eqPresetName == name) {
                         viewModel.setEqPreset(name)
                     }
                 }
                 playback.eqPresets.forEach { name ->
-                    PresetChip(name, playback.eqEnabled && playback.eqPresetName == name) {
+                    if (name == "Personalizado") return@forEach
+                    PresetChip(name, on && playback.eqPresetName == name) {
                         viewModel.setEqPreset(name)
                     }
                 }
-                PresetChip("Personalizado", playback.eqEnabled && playback.eqPresetName == "Personalizado") {
-                    viewModel.setEqPreset("Personalizado")
-                }
+                Spacer(Modifier.width(24.dp))
             }
             Spacer(Modifier.height(18.dp))
             BassSlider(playback.bass, viewModel)
             Spacer(Modifier.height(8.dp))
             playback.eqBands.forEach { band ->
-                BandSlider(band, viewModel)
+                BandSlider(band, viewModel, enabled = on)
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -113,7 +114,7 @@ private fun PresetChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(50))
             .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
 
@@ -147,10 +148,15 @@ private fun BassSlider(strength: Int, viewModel: ResonarViewModel) {
 }
 
 @Composable
-private fun BandSlider(band: EqBandUi, viewModel: ResonarViewModel) {
+private fun BandSlider(band: EqBandUi, viewModel: ResonarViewModel, enabled: Boolean) {
     var dragging by remember(band.index) { mutableStateOf(false) }
     var local by remember(band.index) { mutableFloatStateOf(band.levelMb.toFloat()) }
-    val shown = if (dragging) local else band.levelMb.toFloat()
+    // Apagado se ve plano. La curva queda guardada y vuelve al prender.
+    val shown = when {
+        !enabled -> 0f
+        dragging -> local
+        else -> band.levelMb.toFloat()
+    }
     val min = band.minMb.toFloat()
     val max = band.maxMb.toFloat().coerceAtLeast(min + 1f)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -164,14 +170,16 @@ private fun BandSlider(band: EqBandUi, viewModel: ResonarViewModel) {
     Slider(
         value = shown.coerceIn(min, max),
         onValueChange = {
+            if (!enabled) return@Slider
             dragging = true
             local = it
             viewModel.previewEqBand(band.index, it.toInt())
         },
         onValueChangeFinished = {
-            viewModel.commitEqBand(band.index, local.toInt())
+            if (enabled) viewModel.commitEqBand(band.index, local.toInt())
             dragging = false
         },
+        enabled = enabled,
         valueRange = min..max,
         colors = SliderDefaults.colors(
             thumbColor = MaterialTheme.colorScheme.primary,

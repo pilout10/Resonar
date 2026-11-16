@@ -226,6 +226,7 @@ class OnlineDownloader(private val app: Context) {
         resolve: suspend (OnlineTrack) -> StreamHandle,
         onProgress: (Int) -> Unit,
         choice: com.resonar.app.online.AudioOption? = null,
+        shouldCancel: () -> Boolean = { false },
     ): Unit = mutex.withLock {
         withContext(Dispatchers.IO) {
             // ¿Ya está? No duplicar (el botón igual se deshabilita, esto es defensa).
@@ -286,6 +287,12 @@ class OnlineDownloader(private val app: Context) {
                         java.io.FileOutputStream(temp, append).use { output ->
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
+                                // CANCELACIÓN cooperativa: HttpURLConnection no
+                                // responde a interrupciones de hilo, así que la
+                                // única forma limpia de cancelar es revisar entre
+                                // trozos. Al cancelar se conserva el .parte para
+                                // reanudar en el próximo intento.
+                                if (shouldCancel()) throw IllegalStateException("Cancelada")
                                 val read = input.read(buffer)
                                 if (read < 0) break
                                 output.write(buffer, 0, read)

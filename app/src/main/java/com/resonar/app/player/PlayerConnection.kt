@@ -236,6 +236,32 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
         c.play()
     }
 
+    /**
+     * Pone [item] a sonar sin tirar la cola que ya había.
+     * Si el tema ya está en la fila, salta a esa fila. Si no, lo inserta después
+     * del que suena. Una cola vacía arranca solo con este tema.
+     */
+    fun playKeepingQueue(item: MediaItem) {
+        val c = controller
+        if (c == null || !c.isConnected || c.mediaItemCount == 0) {
+            playQueue(listOf(item), 0)
+            return
+        }
+        val id = item.mediaId
+        for (index in 0 until c.mediaItemCount) {
+            if (c.getMediaItemAt(index).mediaId == id) {
+                c.seekTo(index, 0L)
+                c.play()
+                return
+            }
+        }
+        val index = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+        c.addMediaItem(index, item)
+        c.seekTo(index, 0L)
+        c.prepare()
+        c.play()
+    }
+
     fun togglePlayback() {
         val c = controller ?: return
         // playWhenReady es el estado fuente-de-verdad (lección de la prueba con el juego).
@@ -408,17 +434,13 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
     fun commitEqBand(index: Int, levelMb: Int) = previewEqBand(index, levelMb)
 
     fun setEqEnabled(enabled: Boolean) {
+        // Apagar no borra la curva: al volver a prender sigue "Más graves" o la que fuera.
         if (enabled && store.getEqPresetName() == "Apagado") store.setEqPresetName("Personalizado")
-        if (!enabled) store.setEqPresetName("Apagado")
         store.setEqEnabled(enabled)
         _state.update {
             it.copy(
                 eqEnabled = enabled,
-                eqPresetName = if (enabled) {
-                    if (it.eqPresetName == "Apagado") "Personalizado" else it.eqPresetName
-                } else {
-                    "Apagado"
-                },
+                eqPresetName = if (enabled && it.eqPresetName == "Apagado") "Personalizado" else it.eqPresetName,
             )
         }
     }

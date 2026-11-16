@@ -2,6 +2,8 @@ package com.resonar.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,7 +50,7 @@ import com.resonar.app.online.OnlineTrack
  * del mismo tema, un chip "+N versiones" que abre la hoja para elegir fuente.
  */
 @Composable
-fun OnlineSearchPanel(viewModel: ResonarViewModel, playback: PlaybackUiState) {
+fun OnlineSearchPanel(viewModel: ResonarViewModel, playback: PlaybackUiState, modifier: Modifier = Modifier) {
     val state by viewModel.onlineState.collectAsState()
     val ytFilter by viewModel.ytFilter.collectAsState()
     val enabledSources by viewModel.enabledSources.collectAsState()
@@ -56,7 +58,7 @@ fun OnlineSearchPanel(viewModel: ResonarViewModel, playback: PlaybackUiState) {
     val artPx = artDecodePx(120f, playback.audioQuality, playback.dataSaver)
     val activeNames = enabledSources.filterValues { it }.keys.map { sourceLabel(it) }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier.fillMaxSize()) {
         // YouTube (2B): el usuario elige si busca canciones (YT Music, limpio)
         // o videos. Evita que la búsqueda se llene de basura.
         if (youtubeOn) {
@@ -66,13 +68,19 @@ fun OnlineSearchPanel(viewModel: ResonarViewModel, playback: PlaybackUiState) {
                 onSelect = viewModel::setYtFilter,
             )
         }
+        val shown = if (ytFilter == 1) {
+            state.results.filter { it.primary.sourceId == "youtube" }
+        } else {
+            state.results
+        }
         when {
             state.loading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         EqualizerBars(playing = true)
                         Text(
-                            "Buscando en ${activeNames.joinToString(" + ")}…",
+                            if (ytFilter == 1) "Buscando videos en YouTube…"
+                            else "Buscando en ${activeNames.joinToString(" + ")}…",
                             modifier = Modifier.padding(top = 10.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -80,47 +88,60 @@ fun OnlineSearchPanel(viewModel: ResonarViewModel, playback: PlaybackUiState) {
                 }
             }
             state.offline -> {
-                OnlineHint(
-                    R.drawable.ic_clear,
-                    "Sin conexión",
-                    "La búsqueda en línea necesita internet. Podés seguir escuchando tu biblioteca mientras tanto.",
-                )
-            }
-            state.query.isBlank() -> {
-                OnlineHint(
-                    R.drawable.ic_search,
-                    "Buscá en la nube",
-                    "Escribí \"artista - tema\" y Resonar busca a la vez en ${activeNames.joinToString()}.",
-                )
-            }
-            state.results.isEmpty() -> {
-                OnlineHint(
-                    R.drawable.ic_music,
-                    "Nada en las fuentes en línea",
-                    if (state.failedSources.isEmpty()) {
-                        "Probá con otro nombre, o buscá tu tema en la biblioteca del teléfono."
-                    } else {
-                        "${state.failedSources.joinToString()} no respondió. Probá de nuevo en un rato."
-                    },
-                )
-            }
-            else -> {
-                if (state.failedSources.isNotEmpty()) {
-                    Text(
-                        "${state.failedSources.joinToString()} no respondió — el resto de las fuentes sí.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    OnlineHint(
+                        R.drawable.ic_clear,
+                        "Sin conexión",
+                        "La búsqueda en línea necesita internet. Podés seguir escuchando tu biblioteca mientras tanto.",
                     )
                 }
-                LazyColumn(contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
-                    items(state.results, key = { it.primary.mediaId }) { result ->
-                        OnlineRow(result.primary, artPx, viewModel) { viewModel.playOnline(result.primary) }
-                        if (result.variants.isNotEmpty()) {
-                            VersionsChip(
-                                count = result.variants.size,
-                                onClick = { viewModel.openVersionSheet(result) },
-                            )
+            }
+            state.query.isBlank() -> {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    OnlineHint(
+                        R.drawable.ic_search,
+                        "Buscá en la nube",
+                        "Escribí \"artista - tema\" y Resonar busca a la vez en ${activeNames.joinToString()}.",
+                    )
+                }
+            }
+            shown.isEmpty() -> {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    OnlineHint(
+                        R.drawable.ic_music,
+                        if (ytFilter == 1) "Ningún video" else "Nada en las fuentes en línea",
+                        when {
+                            ytFilter == 1 && state.failedSources.isEmpty() ->
+                                "Probá con otro nombre. Videos busca solo en YouTube."
+                            state.failedSources.isEmpty() ->
+                                "Probá con otro nombre, o buscá tu tema en la biblioteca del teléfono."
+                            else -> "${state.failedSources.joinToString()} no respondió. Probá de nuevo en un rato."
+                        },
+                    )
+                }
+            }
+            else -> {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    if (state.failedSources.isNotEmpty()) {
+                        Text(
+                            "${state.failedSources.joinToString()} no respondió — el resto de las fuentes sí.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                    ) {
+                        items(shown, key = { it.primary.mediaId }) { result ->
+                            OnlineRow(result.primary, artPx, viewModel) { viewModel.playOnline(result.primary) }
+                            if (result.variants.isNotEmpty()) {
+                                VersionsChip(
+                                    count = result.variants.size,
+                                    onClick = { viewModel.openVersionSheet(result) },
+                                )
+                            }
                         }
                     }
                 }
@@ -177,7 +198,10 @@ private fun OnlineRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 OnlineBadge(sourceLabel(track.sourceId), highlighted = true)
                 if (track.license != null) {
                     Spacer(Modifier.width(6.dp))
@@ -195,8 +219,7 @@ private fun OnlineRow(
             }
         }
         Text(
-            // Duración honesta: "—" cuando la fuente no la informa (IA a veces).
-            track.durationMs?.let { formatClock(it) } ?: "—",
+            formatDuration(track.durationMs),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -260,6 +283,7 @@ private fun OnlineBadge(text: String, highlighted: Boolean) {
         text,
         style = MaterialTheme.typography.labelSmall,
         fontWeight = FontWeight.Medium,
+        maxLines = 1,
         color = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
@@ -384,7 +408,7 @@ fun OnlineVersionSheet(
                             }
                         }
                         Text(
-                            track.durationMs?.let { formatClock(it) } ?: "—",
+                            formatDuration(track.durationMs),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

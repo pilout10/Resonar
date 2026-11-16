@@ -139,7 +139,7 @@ fun HomeTab(viewModel: ResonarViewModel, wide: Boolean) {
                     if (library.musicFolderLabel.isBlank()) {
                         "Todo el teléfono, menos audios de WhatsApp. La carpeta se elige en Configuración."
                     } else {
-                        "Solo ${library.musicFolderLabel}."
+                        "Solo ${library.musicFolderLabel}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -400,7 +400,7 @@ private fun FeatureCard(
         Column {
             Text(title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "$count canciones",
+                trackCountLabel(count),
                 color = Color.White.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.bodySmall,
             )
