@@ -1,6 +1,8 @@
 package com.resonar.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -25,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,7 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.resonar.app.R
 import com.resonar.app.data.MusicCollections
+import com.resonar.app.data.OnlineTrackRef
 import com.resonar.app.data.albumArtUri
+import com.resonar.app.data.toRef
 
 @Composable
 fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
@@ -42,6 +48,14 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
     val playback by viewModel.playbackState.collectAsState()
     val user by viewModel.userState.collectAsState()
     val tracks = remember(detail, library.tracks, user) { viewModel.tracksFor(detail) }
+    // ETAPA 3 (parte 3): temas de la búsqueda ONLINE guardados en esta playlist.
+    val onlineRefs = viewModel.onlineTracksFor(detail)
+    val downloadedIds by viewModel.downloadedIds.collectAsState()
+    val onlineDownloads by viewModel.onlineDownloads.collectAsState()
+    val pendingOnline = onlineRefs.count { ref ->
+        ref.mediaId !in downloadedIds &&
+            onlineDownloads[ref.mediaId]?.let { !it.done && it.error == null } != true
+    }
     val artPx = artDecodePx(96f, playback.audioQuality, playback.dataSaver)
     val title = when (detail) {
         is LibraryDetail.Artist -> library.artists.firstOrNull { it.id == detail.id }?.name ?: "Artista"
@@ -52,7 +66,8 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
     val subtitle = when (detail) {
         is LibraryDetail.Album -> library.albums.firstOrNull { it.id == detail.id }?.artistName.orEmpty()
         is LibraryDetail.Genre -> "Género"
-        else -> trackCountLabel(tracks.size)
+        // En una playlist el total incluye los temas online guardados.
+        else -> trackCountLabel(tracks.size + onlineRefs.size)
     }
     val openCollection = detail as? LibraryDetail.Collection
     val canRemove = openCollection != null &&
@@ -112,18 +127,43 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
             }
         }
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                // Si no entran los tres botones, se deslizan: nunca se aprieta
+                // el texto en vertical (pasaba con "Descargar (2)").
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(onClick = { viewModel.playDetail() }, enabled = tracks.isNotEmpty(), shape = RoundedCornerShape(50)) {
+            Button(
+                onClick = { viewModel.playDetail() },
+                enabled = tracks.isNotEmpty() || onlineRefs.isNotEmpty(),
+                shape = RoundedCornerShape(50),
+            ) {
                 Icon(painterResource(R.drawable.ic_play), contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Reproducir")
             }
-            OutlinedButton(onClick = { viewModel.playDetail(true) }, enabled = tracks.isNotEmpty(), shape = RoundedCornerShape(50)) {
+            OutlinedButton(
+                onClick = { viewModel.playDetail(true) },
+                enabled = tracks.isNotEmpty() || onlineRefs.isNotEmpty(),
+                shape = RoundedCornerShape(50),
+            ) {
                 Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Aleatorio")
+            }
+            // Descargar la playlist: encola todos los temas online que falten.
+            // Solo aparece si hay algo pendiente de bajar.
+            if (pendingOnline > 0) {
+                OutlinedButton(
+                    onClick = { (detail as? LibraryDetail.Collection)?.let { viewModel.downloadPlaylist(it.key) } },
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(painterResource(R.drawable.ic_download), contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Descargar ($pendingOnline)")
+                }
             }
         }
         if (canDelete) {
@@ -132,7 +172,7 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) { Text("Eliminar playlist") }
         }
-        if (tracks.isEmpty()) {
+        if (tracks.isEmpty() && onlineRefs.isEmpty()) {
             Text(
                 "Esta lista todavía no tiene canciones.",
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -156,6 +196,63 @@ fun DetailScreen(viewModel: ResonarViewModel, detail: LibraryDetail) {
                     onDelete = if (canRemove) null else ({ viewModel.requestDeleteTrack(track) }),
                 )
             }
+            // Los temas ONLINE de esta playlist van después de los locales:
+            // suenan por stream y cada uno tiene su control de descarga.
+            if (onlineRefs.isNotEmpty()) {
+                item(key = "online_header") {
+                    Text(
+                        "En línea en esta playlist",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+                items(onlineRefs, key = { it.mediaId }) { ref ->
+                    OnlinePlaylistRow(ref, artPx, viewModel)
+                }
+            }
         }
+    }
+}
+
+/**
+ * Fila de un tema ONLINE dentro de una playlist: toca y suena por stream,
+ * botón de descarga igual que en la búsqueda (✓ cuando ya está bajado).
+ */
+@Composable
+private fun OnlinePlaylistRow(ref: OnlineTrackRef, artPx: Int, viewModel: ResonarViewModel) {
+    val track = ref.toOnlineTrack()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { viewModel.playOnline(track) }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TrackArt(model = ref.artUrl, size = 52.dp, corner = 12.dp, maxDecodePx = artPx)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(ref.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                ref.artist,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "En línea",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            formatDuration(ref.durationMs),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        DownloadControl(track, viewModel)
     }
 }

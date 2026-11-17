@@ -166,8 +166,9 @@ fun AppShell(viewModel: ResonarViewModel) {
         }
 
         val picked = pickerTrack
-        if (picked != null) {
-            PlaylistPickerDialog(viewModel, picked, viewModel::closePlaylistPicker)
+        val pickedOnline by viewModel.playlistPickerOnline.collectAsState()
+        if (picked != null || pickedOnline != null) {
+            PlaylistPickerDialog(viewModel, viewModel::closePlaylistPicker)
         }
 
         val pendingDelete by viewModel.pendingDelete.collectAsState()

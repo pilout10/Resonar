@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.resonar.app.R
+import com.resonar.app.data.toRef
 import com.resonar.app.online.AudioOption
 import com.resonar.app.online.OnlineResult
 import com.resonar.app.player.PlaybackUiState
@@ -223,17 +224,32 @@ private fun OnlineRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(4.dp))
+        // Agregar a playlist: las playlists aceptan temas online (Etapa 3 parte 3),
+        // y desde la playlist se pueden bajar todos juntos.
+        androidx.compose.material3.IconButton(
+            onClick = { viewModel.openPlaylistPicker(track.toRef()) },
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_playlists),
+                contentDescription = "Agregar a playlist",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(4.dp))
         DownloadControl(track, viewModel)
     }
 }
 
 /**
  * CONTROL DE DESCARGA (2B): icono de descarga → progreso → ✓. Un tema con ✓
- * suena del disco, incluso sin internet.
+ * suena del disco, incluso sin internet. Reutilizado también por los temas
+ * online dentro de una playlist (Etapa 3 parte 3).
  */
 @Composable
-private fun DownloadControl(track: OnlineTrack, viewModel: ResonarViewModel) {
+fun DownloadControl(track: OnlineTrack, viewModel: ResonarViewModel) {
     val downloads by viewModel.onlineDownloads.collectAsState()
     val downloadedIds by viewModel.downloadedIds.collectAsState()
     val dl = downloads[track.mediaId]

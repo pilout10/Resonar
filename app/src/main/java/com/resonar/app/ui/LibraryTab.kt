@@ -204,7 +204,9 @@ fun PlaylistsPage(viewModel: ResonarViewModel) {
             val first = playlist.trackIds.firstOrNull()?.let { byId[it] }
             PlaylistRow(
                 title = playlist.name,
-                count = playlist.trackIds.count { byId[it] != null },
+                // El contador honesto: temas locales VIVOS + temas online
+                // guardados (los locales borrados del teléfono no se cuentan).
+                count = playlist.trackIds.count { byId[it] != null } + playlist.onlineTracks.size,
                 colors = playlistColors[absHash(playlist.id) % playlistColors.size],
                 icon = R.drawable.ic_playlists,
                 art = first?.let { it.artUrl ?: if (it.albumArtId > 0L) albumArtUri(it.albumArtId) else null },
@@ -382,7 +384,7 @@ private fun SongPage(viewModel: ResonarViewModel) {
 }
 
 @Composable
-fun PlaylistPickerDialog(viewModel: ResonarViewModel, trackId: Long, onDismiss: () -> Unit) {
+fun PlaylistPickerDialog(viewModel: ResonarViewModel, onDismiss: () -> Unit) {
     val user by viewModel.userState.collectAsState()
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
@@ -406,7 +408,9 @@ fun PlaylistPickerDialog(viewModel: ResonarViewModel, trackId: Long, onDismiss: 
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                viewModel.addToPlaylist(playlist.id, trackId)
+                                // Sirve para el tema local (id) y el online (referencia):
+                                // el ViewModel decide cuál de los dos está esperando.
+                                viewModel.confirmPlaylistPick(playlist.id)
                                 onDismiss()
                             }
                             .padding(vertical = 12.dp),
@@ -421,7 +425,7 @@ fun PlaylistPickerDialog(viewModel: ResonarViewModel, trackId: Long, onDismiss: 
                     if (creating) {
                         val id = viewModel.createPlaylist(name)
                         if (id != null) {
-                            viewModel.addToPlaylist(id, trackId)
+                            viewModel.confirmPlaylistPick(id)
                             onDismiss()
                         }
                     } else {

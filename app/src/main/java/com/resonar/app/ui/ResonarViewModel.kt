@@ -18,6 +18,7 @@ import com.resonar.app.data.LibrarySyncer
 import com.resonar.app.data.LocalLibraryRepository
 import com.resonar.app.data.LocalTrack
 import com.resonar.app.data.MusicCollections
+import com.resonar.app.data.OnlineTrackRef
 import com.resonar.app.data.UserLibrarySnapshot
 import com.resonar.app.data.UserLibraryStore
 import com.resonar.app.data.albumArtUri
@@ -105,6 +106,10 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _playlistPickerTrackId = MutableStateFlow<Long?>(null)
     val playlistPickerTrackId: StateFlow<Long?> = _playlistPickerTrackId.asStateFlow()
+
+    /** Tema ONLINE esperando que el usuario elija playlist (Etapa 3 parte 3). */
+    private val _playlistPickerOnline = MutableStateFlow<OnlineTrackRef?>(null)
+    val playlistPickerOnline: StateFlow<OnlineTrackRef?> = _playlistPickerOnline.asStateFlow()
 
     /** Tema esperando la confirmación de borrado (deslizar → cartel "¿Eliminar?"). */
     private val _pendingDelete = MutableStateFlow<LocalTrack?>(null)
@@ -581,7 +586,34 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     fun closeDetail() { _detail.value = null }
 
     fun openPlaylistPicker(trackId: Long) { _playlistPickerTrackId.value = trackId }
-    fun closePlaylistPicker() { _playlistPickerTrackId.value = null }
+
+    /** Versión para resultados de la búsqueda online (se guarda como referencia). */
+    fun openPlaylistPicker(track: OnlineTrackRef) {
+        _playlistPickerTrackId.value = null
+        _playlistPickerOnline.value = track
+    }
+
+    fun closePlaylistPicker() {
+        _playlistPickerTrackId.value = null
+        _playlistPickerOnline.value = null
+    }
+
+    /**
+     * El usuario eligió una playlist en el picker: el tema era de la biblioteca
+     * (id local) o de la búsqueda online (referencia). UNA sola de las dos.
+     */
+    fun confirmPlaylistPick(playlistId: String) {
+        val localId = _playlistPickerTrackId.value
+        val onlineRef = _playlistPickerOnline.value
+        when {
+            localId != null -> addToPlaylist(playlistId, localId)
+            onlineRef != null -> {
+                userLibrary.addOnlineToPlaylist(playlistId, onlineRef)
+                Toast.makeText(getApplication(), "Agregada a la playlist", Toast.LENGTH_SHORT).show()
+            }
+        }
+        closePlaylistPicker()
+    }
 
     // ── Reproducción ─────────────────────────────────────────────────────
 
@@ -598,13 +630,34 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun playCollection(key: String, shuffle: Boolean = false) {
-        val tracks = resolve(LibraryDetail.Collection(key), library.state.value, userLibrary.state.value)
-        if (shuffle) shufflePlay(tracks) else playAll(tracks)
+        val detail = LibraryDetail.Collection(key)
+        val tracks = resolve(detail, library.state.value, userLibrary.state.value)
+        if (tracks.isNotEmpty()) {
+            if (shuffle) shufflePlay(tracks) else playAll(tracks)
+            return
+        }
+        // Playlist de solo temas online: arranca por stream en vez de fallar en silencio.
+        val online = onlineTracksFor(detail)
+        if (online.isNotEmpty()) {
+            val pick = if (shuffle) online.random() else online.first()
+            playOnline(pick.toOnlineTrack())
+        }
     }
 
     fun playDetail(shuffle: Boolean = false) {
-        val tracks = tracksFor(_detail.value ?: return)
-        if (shuffle) shufflePlay(tracks) else playAll(tracks)
+        val detail = _detail.value ?: return
+        val tracks = tracksFor(detail)
+        if (tracks.isNotEmpty()) {
+            if (shuffle) shufflePlay(tracks) else playAll(tracks)
+            return
+        }
+        // Playlist con SOLO temas online (Etapa 3 parte 3): "Reproducir" no se
+        // queda muerto — arranca por stream con el primero (o uno al azar).
+        val online = onlineTracksFor(detail)
+        if (online.isNotEmpty()) {
+            val pick = if (shuffle) online.random() else online.first()
+            playOnline(pick.toOnlineTrack())
+        }
     }
 
     fun playDetailAt(index: Int) {
@@ -613,6 +666,15 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun tracksFor(detail: LibraryDetail): List<LocalTrack> = resolve(detail, library.state.value, userLibrary.state.value)
+
+    /**
+     * Temas de la búsqueda ONLINE que viven en esta playlist (Etapa 3 parte 3).
+     * Solo las playlists del usuario pueden tenerlos; colecciones curadas no.
+     */
+    fun onlineTracksFor(detail: LibraryDetail): List<OnlineTrackRef> =
+        (detail as? LibraryDetail.Collection)?.let { c ->
+            userLibrary.state.value.playlists.firstOrNull { it.id == c.key }?.onlineTracks
+        }.orEmpty()
 
     fun togglePlayback() = playback.togglePlayback()
     fun next() = playback.next()
@@ -700,6 +762,55 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     fun startSyncNow() = container.librarySyncer.startNow()
     fun pauseSync() = container.librarySyncer.pause()
     fun resumeSync() = container.librarySyncer.resume()
+
+    /**
+     * ETAPA 3 (parte 3): baja TODOS los temas online que falten de una playlist
+     * y los encola. UNA decisión del usuario encola N temas: las guardas
+     * (espacio, solo-Wi-Fi) se chequean UNA vez, no por tema. La calidad se
+     * elige sola (la mejor que la fuente ofrece — igual que con el switch de
+     * preguntar calidad apagado), porque preguntar por CADA tema de una lista
+     * larga sería insoportable.
+     */
+    fun downloadPlaylist(playlistId: String) {
+        vmScope.launch {
+            val refs = userLibrary.state.value.playlists
+                .firstOrNull { it.id == playlistId }?.onlineTracks.orEmpty()
+            // Solo los que no están descargados ni ya en cola.
+            val pending = refs.filter { ref ->
+                ref.mediaId !in _downloadedIds.value &&
+                    _onlineDownloads.value[ref.mediaId]?.let { !it.done && it.error == null } != true
+            }
+            if (pending.isEmpty()) {
+                Toast.makeText(getApplication(), "Ya está todo descargado", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val downloader = container.onlineDownloader
+            val spaceBlocker = downloader.spaceBlocker()
+            if (spaceBlocker != null) {
+                Toast.makeText(getApplication(), spaceBlocker, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val metered = downloader.isOnMeteredNetwork()
+            if (metered && playback.state.value.wifiOnlyDownloads) {
+                Toast.makeText(getApplication(), "Solo por Wi-Fi: la descarga no arrancó", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            var enqueued = 0
+            pending.forEach { ref ->
+                // option = null: el descargador resuelve el stream y toma la
+                // mejor versión — sin llamadas de red acá (una playlist larga
+                // no debe bloquear la pantalla preguntando calidades).
+                if (container.downloadHub.enqueue(ref.toOnlineTrack(), null)) enqueued++
+            }
+            if (enqueued == 0) {
+                Toast.makeText(getApplication(), "No se pudo encolar la descarga", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            Toast.makeText(getApplication(), "$enqueued temas en cola para descargar", Toast.LENGTH_SHORT).show()
+            val intent = android.content.Intent(getApplication(), com.resonar.app.download.DownloadService::class.java)
+            androidx.core.content.ContextCompat.startForegroundService(getApplication(), intent)
+        }
+    }
 
     // ── Borrado limpio de canciones ──────────────────────────────────────
 
