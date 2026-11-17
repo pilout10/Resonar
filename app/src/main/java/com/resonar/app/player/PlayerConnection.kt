@@ -16,6 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +80,12 @@ data class PlaybackUiState(
     val eqPresets: List<String> = emptyList(),
     val eqBands: List<EqBandUi> = emptyList(),
     val bass: Int = 0,
+    /** TEMPORIZADOR DE SUEÑO (Etapa 4): hora (reloj de pared) en que se pausa. null = apagado. */
+    val sleepTimerEndsAtMs: Long? = null,
+    /** Variante del temporizador: pausar apenas termine ESTA canción. */
+    val sleepAtEndOfTrack: Boolean = false,
+    /** RADIO AUTOMÁTICA (Etapa 4): cuando la cola termina, sumar parecidos sola. */
+    val autoRadio: Boolean = false,
 )
 
 /**
@@ -87,8 +94,22 @@ data class PlaybackUiState(
  *  - la librería, el mini reproductor y la pantalla completa leen SIEMPRE el mismo estado,
  *  - conectarse/desconectarse entre pantallas no toca el MediaController,
  *  - hay UN solo sondeo de estado (RAM, posición) para toda la UI: cero trabajos duplicados.
+ *
+ * [radioSeed] entrega candidatos "parecidos" para la RADIO AUTOMÁTICA (Etapa 4).
+ * Se inyecta desde AppContainer (que tiene biblioteca + fuentes online) para que
+ * el puente no dependa de pantallas: si la cola termina con el proceso vivo
+ * (aunque la app esté en segundo plano), la radio igual suma temas.
  */
-class PlayerConnection(context: Context, private val scope: CoroutineScope) {
+class PlayerConnection(
+    context: Context,
+    private val scope: CoroutineScope,
+    private val radioSeed: suspend (
+        seedMediaId: String?,
+        seedArtist: String?,
+        seedTitle: String?,
+        excludeMediaIds: Set<String>,
+    ) -> List<MediaItem> = { _, _, _, _ -> emptyList() },
+) {
 
     private val app: Context = context.applicationContext
     private val store = PlaybackStateStore(app)
@@ -119,6 +140,7 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
             eqPresets = savedEqSnapshot?.presets.orEmpty(),
             eqBands = savedEqSnapshot?.bands.orEmpty(),
             bass = savedEqSnapshot?.bass ?: store.getBassStrength(),
+            autoRadio = store.isAutoRadio(),
         ),
     )
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
@@ -426,6 +448,92 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
         _state.update { it.copy(saveToPublicMusic = enabled) }
     }
 
+    /** Radio automática: cuando la cola termina, sumar sola canciones parecidas. */
+    fun setAutoRadio(enabled: Boolean) {
+        store.setAutoRadio(enabled)
+        _state.update { it.copy(autoRadio = enabled) }
+    }
+
+    // ── Temporizador de sueño (Etapa 4) ──────────────────────────────────
+
+    /**
+     * Vida del temporizador en memoria del proceso: si Android mata el proceso
+     * (no el servicio, la app entera), el temporizador muere con él. Honestidad
+     * por diseño: no se finge que un temporizador sobrevivió a un reinicio.
+     */
+    private var sleepJob: Job? = null
+
+    /** Pausar la música dentro de [minutes] minutos (0 = apagar). */
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        sleepJob = null
+        if (minutes <= 0) {
+            _state.update { it.copy(sleepTimerEndsAtMs = null, sleepAtEndOfTrack = false) }
+            return
+        }
+        val endsAt = System.currentTimeMillis() + minutes * 60_000L
+        _state.update { it.copy(sleepTimerEndsAtMs = endsAt, sleepAtEndOfTrack = false) }
+        sleepJob = scope.launch {
+            delay(minutes * 60_000L)
+            controller?.pause()
+            _state.update { it.copy(sleepTimerEndsAtMs = null, sleepAtEndOfTrack = false) }
+        }
+    }
+
+    /** Variante: suena hasta el final de ESTA canción y para. */
+    fun sleepAtEndOfTrack() {
+        sleepJob?.cancel()
+        sleepJob = null
+        _state.update { it.copy(sleepTimerEndsAtMs = null, sleepAtEndOfTrack = true) }
+    }
+
+    fun cancelSleepTimer() {
+        sleepJob?.cancel()
+        sleepJob = null
+        _state.update { it.copy(sleepTimerEndsAtMs = null, sleepAtEndOfTrack = false) }
+    }
+
+    // ── Radio automática (Etapa 4) ───────────────────────────────────────
+
+    /** Evita lanzar dos veces mientras la primera tanda todavía no entró. */
+    private var radioFilling = false
+
+    /**
+     * La cola llegó al final (STATE_ENDED con repetir en OFF): si la radio está
+     * prendida, pide candidatos parecidos y los AGREGA, sin tirar lo que sonó.
+     * Si el generador no encuentra nada, no toca la cola y no finge que sumó.
+     */
+    private fun onQueueEnded(c: MediaController) {
+        if (c.repeatMode != Player.REPEAT_MODE_OFF) return
+        if (c.mediaItemCount == 0) return
+        if (!store.isAutoRadio()) return
+        if (radioFilling) return
+        radioFilling = true
+        scope.launch {
+            try {
+                val seed = _state.value
+                val exclude = buildSet {
+                    for (index in 0 until c.mediaItemCount) add(c.getMediaItemAt(index).mediaId)
+                }
+                val items = radioSeed(seed.currentMediaId, seed.currentArtist, seed.currentTitle, exclude)
+                if (items.isEmpty()) return@launch
+                val start = c.mediaItemCount
+                c.addMediaItems(start, items)
+                // Terminada la cola, el player queda en ENDED: hay que empujarlo
+                // a la primera canción nueva para que siga sonando sola.
+                if (c.playbackState == Player.STATE_ENDED) {
+                    c.seekTo(start, 0L)
+                    c.prepare()
+                    c.play()
+                }
+            } catch (e: Exception) {
+                Log.w("ResonarPlayer", "Radio automática no pudo sumar temas: ${e.message}")
+            } finally {
+                radioFilling = false
+            }
+        }
+    }
+
     /**
      * El efecto corre en el servicio. Acá solo se guarda la preferencia;
      * PlaybackEqualizer la aplica y devuelve las bandas reales del teléfono.
@@ -557,6 +665,12 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val c = controller ?: return
             val meta = mediaItem?.mediaMetadata
+            // TEMPORIZADOR "al terminar esta canción": la canción nueva ya entró,
+            // la pausamos al toque — el efecto percibido es "paró al terminar".
+            if (_state.value.sleepAtEndOfTrack) {
+                c.pause()
+                _state.update { it.copy(sleepTimerEndsAtMs = null, sleepAtEndOfTrack = false) }
+            }
             // Solo la canción que entra. Releer toda la cola en cada salto trababa la pantalla.
             _state.update {
                 it.copy(
@@ -617,6 +731,12 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
 
         override fun onRepeatModeChanged(repeatMode: Int) {
             _state.update { it.copy(repeatMode = repeatMode) }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // RADIO AUTOMÁTICA: la cola completa llegó al final. Con "repetir"
+            // activo nunca llega a ENDED (la cola sola vuelve a empezar).
+            if (playbackState == Player.STATE_ENDED) controller?.let { onQueueEnded(it) }
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {

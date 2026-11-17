@@ -178,6 +178,18 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             qualityLabel(playback.audioQuality),
             onClick = { qualitySheet = true },
         )
+        // RADIO AUTOMÁTICA (Etapa 4): la cola que se repone sola.
+        PrefRow(R.drawable.ic_shuffle, "Radio automática", trailing = {
+            Switch(checked = playback.autoRadio, onCheckedChange = viewModel::setAutoRadio)
+        })
+        Text(
+            "Cuando la cola termina, Resonar suma sola más canciones parecidas: " +
+                "primero del mismo artista o género de tu música; si falta, busca en línea. " +
+                "Con «Repetir» activado, la radio no interviene.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+        )
         PrefRow(R.drawable.ic_download, "Descarga automática", trailing = {
             Switch(checked = playback.autoDownload, onCheckedChange = viewModel::setAutoDownload)
         })

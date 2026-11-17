@@ -758,6 +758,19 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     fun setAskDownloadQuality(enabled: Boolean) = playback.setAskDownloadQuality(enabled)
     fun setSaveToPublicMusic(enabled: Boolean) = playback.setSaveToPublicMusic(enabled)
 
+    /** RADIO AUTOMÁTICA (Etapa 4): al terminar la cola, sumar parecidos sola. */
+    fun setAutoRadio(enabled: Boolean) = playback.setAutoRadio(enabled)
+
+    // ── Temporizador de sueño (Etapa 4) ──────────────────────────────────
+
+    /** Pausar dentro de N minutos (0 = apagar). */
+    fun setSleepTimer(minutes: Int) = playback.setSleepTimer(minutes)
+
+    /** Suena hasta el final de ESTA canción y para. */
+    fun sleepAtEndOfTrack() = playback.sleepAtEndOfTrack()
+
+    fun cancelSleepTimer() = playback.cancelSleepTimer()
+
     /** Descarga manual: baja todo lo que falte aunque no haya WiFi. */
     fun startSyncNow() = container.librarySyncer.startNow()
     fun pauseSync() = container.librarySyncer.pause()

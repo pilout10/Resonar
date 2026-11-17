@@ -181,6 +181,16 @@ class PlaybackStateStore(context: Context) {
         prefs.edit().putBoolean(KEY_PUBLIC_MUSIC, enabled).apply()
     }
 
+    /**
+     * RADIO AUTOMÁTICA (Etapa 4): cuando la cola termina, sumar sola más
+     * canciones parecidas. Persistente: es una preferencia de uso, no de sesión.
+     */
+    fun isAutoRadio(): Boolean = prefs.getBoolean(KEY_AUTO_RADIO, false)
+
+    fun setAutoRadio(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_RADIO, enabled).apply()
+    }
+
     fun isEqEnabled(): Boolean = prefs.getBoolean(KEY_EQ_ENABLED, false)
 
     fun setEqEnabled(enabled: Boolean) {
@@ -249,5 +259,7 @@ class PlaybackStateStore(context: Context) {
         const val KEY_WIFI_ONLY = "downloads_wifi_only"
         const val KEY_ASK_QUALITY = "downloads_ask_quality"
         const val KEY_PUBLIC_MUSIC = "downloads_public_music"
+
+        const val KEY_AUTO_RADIO = "auto_radio"
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.resonar.app.data.LibrarySyncer
 import com.resonar.app.data.LocalLibraryRepository
 import com.resonar.app.data.OnlineDownloader
+import com.resonar.app.data.RadioSeed
 import com.resonar.app.data.TrackDeleter
 import com.resonar.app.data.UserLibraryStore
 import com.resonar.app.online.OnlineRepository
@@ -54,7 +55,24 @@ class AppContainer(appContext: Context) {
     val userLibrary: UserLibraryStore = UserLibraryStore(appContext)
 
     /** Puente con el servicio de audio: un solo MediaController compartido por toda la UI. */
-    val playerConnection: PlayerConnection = PlayerConnection(appContext, scope)
+    val playerConnection: PlayerConnection = PlayerConnection(
+        appContext,
+        scope,
+        // RADIO AUTOMÁTICA (Etapa 4): candidatos parecidos cuando la cola
+        // termina. Lambdas tardías: librarySyncer y onlineRepository se
+        // declaran más abajo y solo se usan cuando la radio los necesita.
+        radioSeed = { seedMediaId, seedArtist, seedTitle, exclude ->
+            RadioSeed.build(
+                libraryRepository,
+                librarySyncer,
+                onlineRepository,
+                seedMediaId,
+                seedArtist,
+                seedTitle,
+                exclude,
+            )
+        },
+    )
 
     /**
      * Descarga automática de los temas de nube (Drive) al teléfono. Necesita la

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -85,6 +86,7 @@ fun PlayerScreen(
     var dragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(0f) }
     var showOutput by remember { mutableStateOf(false) }
+    var showSleep by remember { mutableStateOf(false) }
     val shownPosition = if (dragging) dragPosition else playback.positionMs.toFloat()
     val sliderValue = if (knownDuration) shownPosition.coerceIn(0f, duration.toFloat()) else 0f
     val trackId = playback.currentMediaId?.removePrefix("local:")?.toLongOrNull()
@@ -114,6 +116,15 @@ fun PlayerScreen(
                 }
             }
             Spacer(Modifier.weight(1f))
+            // TEMPORIZADOR DE SUEÑO (Etapa 4): luna encendida cuando está activo.
+            val sleepActive = playback.sleepTimerEndsAtMs != null || playback.sleepAtEndOfTrack
+            IconButton(onClick = { showSleep = true }) {
+                Icon(
+                    painterResource(R.drawable.ic_moon),
+                    contentDescription = "Temporizador de sueño",
+                    tint = if (sleepActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             IconButton(onClick = viewModel::openEqualizer) {
                 Icon(painterResource(R.drawable.ic_eq), contentDescription = "Ecualizador")
             }
@@ -345,6 +356,61 @@ fun PlayerScreen(
             title = { Text("Salida de audio") },
             text = { Text("Reproduciendo en este dispositivo (${android.os.Build.MODEL}). En esta versión de Android no se pudo abrir el selector de salida.") },
             confirmButton = { TextButton(onClick = { showOutput = false }) { Text("Listo") } },
+        )
+    }
+
+    // TEMPORIZADOR DE SUEÑO (Etapa 4): minutos o "al terminar esta canción".
+    if (showSleep) {
+        AlertDialog(
+            onDismissRequest = { showSleep = false },
+            title = { Text("Temporizador de sueño") },
+            text = {
+                Column {
+                    when {
+                        playback.sleepTimerEndsAtMs != null -> Text(
+                            "La música para a las " +
+                                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                                    .format(java.util.Date(playback.sleepTimerEndsAtMs!!)) + ".",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        playback.sleepAtEndOfTrack -> Text(
+                            "La música para al terminar esta canción.",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    listOf(15 to "15 minutos", 30 to "30 minutos", 45 to "45 minutos", 60 to "1 hora")
+                        .forEach { (minutes, label) ->
+                            Text(
+                                label,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.setSleepTimer(minutes)
+                                        showSleep = false
+                                    }
+                                    .padding(vertical = 10.dp),
+                            )
+                        }
+                    Text(
+                        "Al terminar esta canción",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.sleepAtEndOfTrack()
+                                showSleep = false
+                            }
+                            .padding(vertical = 10.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.cancelSleepTimer()
+                    showSleep = false
+                }) { Text("Apagar") }
+            },
+            dismissButton = { TextButton(onClick = { showSleep = false }) { Text("Cerrar") } },
         )
     }
 }

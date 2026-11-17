@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Luna (temporizador de sueño). Tinte por tema: el caller decide el color. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M12.34,2.02C6.59,1.82 2,6.42 2,12c0,5.52 4.48,10 10,10 5.58,0 10.18,-4.59 9.98,-10.34 -0.05,-0.42 -0.46,-0.7 -0.87,-0.59 -1.71,0.46 -3.55,0.17 -4.98,-1.08 -1.68,-1.46 -2.09,-3.87 -1.02,-5.79 0.22,-0.39 0.01,-0.87 -0.44,-0.9C13.84,2.07 13.09,2.04 12.34,2.02z" />
+</vector>
