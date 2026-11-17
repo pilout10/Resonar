@@ -1,6 +1,8 @@
 package com.resonar.app.player
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.AudioAttributes
@@ -9,13 +11,17 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.resonar.app.MainActivity
 import com.resonar.app.data.TrackNames
 import com.resonar.app.online.OnlineCatalog
 import kotlinx.coroutines.CoroutineScope
@@ -33,12 +39,15 @@ import java.io.File
  * Puntos clave por los que acá pasa TODO el audio de Resonar:
  *  - Hereda de MediaSessionService: Media3 se encarga de mostrar la notificación
  *    con controles (play/pausa/siguiente/anterior), integrarla con la pantalla de bloqueo,
- *    con los auriculares y con el sistema — sin trabajo extra de nuestra parte.
+ *    con los auriculares y con el sistema.
  *  - El manifest lo declara con foregroundServiceType="mediaPlayback" y el intent-filter
  *    correspondiente, así el sistema puede reconectar y pedir reanudación.
+ *  - La notificación usa el canal resonar_playing (importancia DEFAULT, ongoing):
+ *    en este Motorola la isla de media no aparece con el canal bajo de Media3.
  *  - Estado (canción, índice, posición, cola) se persiste siempre: si el sistema mata el
  *    proceso, onPlaybackResumption reanuda excluyente desde la notificación o el botón del auricular.
  */
+@UnstableApi
 class MusicService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
@@ -57,9 +66,13 @@ class MusicService : MediaSessionService() {
     // READY, etc.) solo la ÚLTIMA posición llega a disco, 250 ms después del primero.
     private var pendingPosition: PlaybackPosition? = null
     private var positionSaveJob: kotlinx.coroutines.Job? = null
+    /** El usuario pidió play. El sistema o un juego no pueden apagarlo si keepPlaying está on. */
+    @Volatile private var userWantsPlaying = false
 
     override fun onCreate() {
         super.onCreate()
+        PlaybackNotification.ensureChannel(this)
+        setMediaNotificationProvider(PlaybackNotification.provider(this))
         store = PlaybackStateStore(this)
 
         // ── Player ──────────────────────────────────────────────────────────
@@ -81,6 +94,7 @@ class MusicService : MediaSessionService() {
             .build()
         val player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
+            .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             // Caché de streaming: los temas de Drive se bajan UNA vez a disco y después
             // suenan sin red. Los archivos locales siguen leyéndose directo (sin copias).
@@ -142,7 +156,7 @@ class MusicService : MediaSessionService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 Log.i("ResonarPlayer", "isPlaying=$isPlaying pos=${player.currentPosition} ms")
-                tone?.refreshSession()
+                if (isPlaying) tone?.refreshSession()
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -230,19 +244,60 @@ class MusicService : MediaSessionService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                // Si algo externo (sistema, auriculares, otra app) manda pausar, queda registrado.
-                Log.i("ResonarPlayer", "playWhenReady=$playWhenReady reason=$reason")
-                // El foco se pide al dar play y se suelta al pausar.
-                // No en el hueco entre una canción y la siguiente: ese hueco es buffering,
-                // playWhenReady sigue en true, y soltar el foco hacía tardar el cambio.
-                if (playWhenReady) focusHandler?.requestAudioFocus() else focusHandler?.abandonAudioFocus()
+                Log.i("ResonarPlayer", "playWhenReady=$playWhenReady reason=$reason userWants=$userWantsPlaying")
+                if (playWhenReady) {
+                    userWantsPlaying = true
+                    focusHandler?.requestAudioFocus()
+                    saveSession(player)
+                    return
+                }
+                val intentional = reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ||
+                    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM ||
+                    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
+                if (intentional) {
+                    userWantsPlaying = false
+                    focusHandler?.abandonAudioFocus()
+                    saveSession(player)
+                    return
+                }
+                if (userWantsPlaying && store.isKeepPlayingEnabled()) {
+                    Log.i("ResonarPlayer", "pausa ajena (reason=$reason): sigo sonando")
+                    player.play()
+                    return
+                }
+                focusHandler?.abandonAudioFocus()
                 saveSession(player)
             }
         })
 
         // ── Sesión multimedia ────────────────────────────────────────────────
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         mediaSession = MediaSession.Builder(this, player)
+            .setId("resonar")
+            .setSessionActivity(openApp)
             .setCallback(object : MediaSession.Callback {
+                @Deprecated("Media3 pide el override para filtrar pausas de otras apps")
+                override fun onPlayerCommandRequest(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    playerCommand: Int,
+                ): Int {
+                    val ours = controller.packageName == packageName
+                    val pause = playerCommand == Player.COMMAND_PLAY_PAUSE ||
+                        playerCommand == Player.COMMAND_STOP
+                    if (!ours && pause && player.playWhenReady && store.isKeepPlayingEnabled()) {
+                        Log.i("ResonarPlayer", "ignoro pausa de ${controller.packageName}")
+                        return SessionError.ERROR_NOT_SUPPORTED
+                    }
+                    return SessionResult.RESULT_SUCCESS
+                }
+
                 /**
                  * PLAYBACK RESUMPTION: si el sistema mató el proceso mientras sonaba,
                  * el usuario puede tocar ▶ en la notificación (o el botón de "play" del auricular)
@@ -275,9 +330,16 @@ class MusicService : MediaSessionService() {
         saveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         scope = saveScope
         saveScope?.launch {
+            var ticks = 0
             while (isActive) {
-                delay(15_000)
-                if (player.isPlaying) saveSession(player)
+                delay(1_000)
+                ticks++
+                val p = mediaSession?.player ?: continue
+                if (userWantsPlaying && store.isKeepPlayingEnabled() && !p.playWhenReady) {
+                    Log.i("ResonarPlayer", "watchdog: el sistema apagó el play, lo prendo")
+                    p.play()
+                }
+                if (p.isPlaying && ticks % 15 == 0) saveSession(p)
             }
         }
     }

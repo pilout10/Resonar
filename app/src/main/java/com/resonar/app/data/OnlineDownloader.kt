@@ -1,12 +1,16 @@
 package com.resonar.app.data
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.StatFs
 import android.util.Log
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import com.resonar.app.online.OnlineTrack
 import com.resonar.app.online.StreamHandle
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +28,10 @@ import java.net.URL
  * DESCARGADOR DE TEMAS EN LÍNEA.
  *
  * El botón de descarga en los resultados "En línea". DÓNDE SE GUARDA:
+ *  - Si el usuario prendió "Guardar descargas en Music/" (Ajustes) y el
+ *    Android es 10 o más nuevo, la descarga va a Music/Resonar en el
+ *    almacenamiento COMPARTIDO vía MediaStore: la ven otros reproductores
+ *    (YouTube Music, VLC…) y sobrevive a desinstalar la app.
  *  - Si el usuario eligió una carpeta de música (Ajustes → Carpeta), la
  *    descarga se crea en una subcarpeta "Descargas" DENTRO de ese árbol,
  *    vía SAF. Así:
@@ -53,7 +61,11 @@ import java.net.URL
  */
 class DownloadPausedException : Exception("Pausada")
 
-class OnlineDownloader(private val app: Context) {
+class OnlineDownloader(
+    private val app: Context,
+    /** ¿El usuario pidió destino público Music/Resonar? Se lee en cada descarga (cambia desde Ajustes). */
+    private val saveToPublicMusic: () -> Boolean = { false },
+) {
 
     /** Entrada del índice: lo mínimo para reproducir y redibujar la fila. */
     @Serializable
@@ -69,6 +81,12 @@ class OnlineDownloader(private val app: Context) {
         val sizeBytes: Long,
         /** Uri del documento SAF (carpeta elegida). null = copia privada de la app. */
         val treeUri: String? = null,
+        /**
+         * Uri de MediaStore (content://media/...) cuando el destino es la
+         * carpeta pública Music/Resonar (Etapa 3 parte 2b). Sobrevive a la
+         * desinstalación y la ven otros reproductores.
+         */
+        val mediaStoreUri: String? = null,
     )
 
     private val dir: File =
@@ -95,6 +113,10 @@ class OnlineDownloader(private val app: Context) {
     init {
         val alive = index.filter { entry ->
             when {
+                entry.mediaStoreUri != null -> {
+                    // Fila de MediaStore (Music/Resonar): se pregunta al ContentProvider.
+                    mediaStoreRowExists(Uri.parse(entry.mediaStoreUri))
+                }
                 entry.treeUri == null -> {
                     // Copia privada de la app: se comprueba el archivo en disco.
                     val file = File(dir, entry.fileName)
@@ -141,7 +163,13 @@ class OnlineDownloader(private val app: Context) {
     fun removeDownload(mediaId: String): Boolean {
         val entry = index.firstOrNull { it.mediaId == mediaId } ?: return false
         val treeUri = entry.treeUri
-        if (treeUri != null) {
+        if (entry.mediaStoreUri != null) {
+            // Music/Resonar: la app creó la fila, puede borrarla directa
+            // (borrar la PROPIA contribución no pide permiso ni diálogo).
+            runCatching {
+                app.contentResolver.delete(Uri.parse(entry.mediaStoreUri), null, null)
+            }.onFailure { Log.w("ResonarDown", "No pude borrar de MediaStore: ${it.message}") }
+        } else if (treeUri != null) {
             runCatching {
                 DocumentsContract.deleteDocument(app.contentResolver, Uri.parse(treeUri))
             }.onFailure { Log.w("ResonarDown", "No pude borrar el documento: ${it.message}") }
@@ -157,6 +185,13 @@ class OnlineDownloader(private val app: Context) {
 
     fun localUriFor(track: OnlineTrack): Uri? {
         val entry = index.firstOrNull { it.mediaId == track.mediaId } ?: return null
+        // Destino público (Music/Resonar): la uri de MediaStore ES el archivo.
+        entry.mediaStoreUri?.let { msUri ->
+            val uri = Uri.parse(msUri)
+            // Si la fila ya no está (la borró otro reproductor o el usuario),
+            // el tema NO está descargado: hay que volver a bajarlo.
+            return if (mediaStoreRowExists(uri)) uri else null
+        }
         entry.treeUri?.let { treeUri ->
             val uri = Uri.parse(treeUri)
             // El documento puede haber sido borrado (desde el sistema o desde Drive):
@@ -260,6 +295,34 @@ class OnlineDownloader(private val app: Context) {
             val fileName = "$safeBase [$unique].$ext"
             val temp = File(dir, "$fileName.parte")
 
+            // ETAPA 3 (parte 2b): con destino público prendido, el archivo puede
+            // YA estar en Music/Resonar de una descarga anterior — por ejemplo
+            // tras REINSTALAR la app: el índice vive en datos privados y se
+            // pierde, pero la carpeta pública sobrevive. Reutilizar esa fila
+            // en vez de bajar todo el tema de nuevo.
+            val public = saveToPublicMusic() &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+            if (public) {
+                reuseExistingInPublicMusic(fileName)?.let { uri ->
+                    addToIndex(
+                        Entry(
+                            mediaId = track.mediaId,
+                            sourceId = track.sourceId,
+                            externalId = track.externalId,
+                            title = track.title,
+                            artist = track.artist,
+                            durationMs = track.durationMs,
+                            artUrl = track.artUrl,
+                            fileName = fileName,
+                            sizeBytes = sizeOfMediaStoreRow(uri),
+                            mediaStoreUri = uri.toString(),
+                        ),
+                    )
+                    Log.i("ResonarDown", "Ya estaba en Music/Resonar: ${track.title}")
+                    return@withContext
+                }
+            }
+
             try {
                 val conn = URL(handle.uri.toString()).openConnection() as HttpURLConnection
                 try {
@@ -320,14 +383,21 @@ class OnlineDownloader(private val app: Context) {
                     }
                     if (temp.length() < 1024) throw IllegalStateException("Descarga vacía")
                     val size = temp.length()
-                    // Mover a su carpeta final: subcarpeta "Descargas" del árbol SAF
-                    // elegido, o la carpeta privada como fallback.
+                    // Destino final (Etapa 3 parte 2b), en orden de preferencia:
+                    // 1) Music/Resonar público vía MediaStore (si el usuario lo
+                    //    pidió en Ajustes y el Android lo soporta: API 29+),
+                    // 2) subcarpeta "Descargas" del árbol SAF elegido,
+                    // 3) la carpeta privada como última red.
                     val tree = folderStore.uri()
                     val mime = handle.mimeType ?: mimeForExt(ext)
-                    val created = if (tree != null) {
-                        moveToDriveFolder(tree, fileName, mime, temp)
-                    } else {
-                        null
+                    var created: Uri? = null
+                    var toPublic = false
+                    if (public) {
+                        created = moveToPublicMusic(fileName, mime, temp, track)
+                        if (created != null) toPublic = true
+                    }
+                    if (created == null && tree != null) {
+                        created = moveToDriveFolder(tree, fileName, mime, temp)
                     }
                     if (created != null) {
                         addToIndex(
@@ -341,10 +411,15 @@ class OnlineDownloader(private val app: Context) {
                                 artUrl = track.artUrl,
                                 fileName = fileName,
                                 sizeBytes = size,
-                                treeUri = created.toString(),
+                                treeUri = if (toPublic) null else created.toString(),
+                                mediaStoreUri = if (toPublic) created.toString() else null,
                             ),
                         )
-                        Log.i("ResonarDown", "Descargado a tu carpeta: ${track.title}")
+                        Log.i(
+                            "ResonarDown",
+                            if (toPublic) "Descargado a Music/Resonar (público): ${track.title}"
+                            else "Descargado a tu carpeta: ${track.title}",
+                        )
                     } else {
                         val file = File(dir, fileName)
                         if (file.exists()) file.delete()
@@ -376,6 +451,103 @@ class OnlineDownloader(private val app: Context) {
             }
         }
     }
+
+    /**
+     * ETAPA 3 (parte 2b): mueve el temporal ya descargado a la carpeta pública
+     * `Music/Resonar` vía MediaStore (Android 10+). Difiere del camino SAF:
+     * acá se INSERTA una fila (IS_PENDING mientras se escribe) y el sistema
+     * la escanea recién cuando se marca terminada — el extractor llena
+     * álbum, duración y demás etiquetas. Hasta ese momento ningún otro
+     * reproductor ve un archivo a la mitad.
+     * Devuelve la Uri de la fila creada, o null si algo falló (el llamador
+     * cae al destino SAF o privado). El temporal se borra solo si salió bien.
+     */
+    private fun moveToPublicMusic(fileName: String, mime: String, temp: File, track: OnlineTrack): Uri? {
+        val cr = app.contentResolver
+        val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+            // Metadatos escritos por si el archivo no trae etiquetas (YouTube
+            // m4a suele venir pelado): que otro reproductor muestre algo útil.
+            put(MediaStore.Audio.Media.TITLE, track.title)
+            put(MediaStore.Audio.Media.ARTIST, track.artist.trim().ifBlank { "<Sin artista>" })
+            put(MediaStore.Audio.Media.MIME_TYPE, mime)
+            put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/Resonar")
+            put(MediaStore.Audio.Media.IS_PENDING, 1)
+        }
+        val created = runCatching { cr.insert(collection, values) }.getOrNull() ?: return null
+        return try {
+            cr.openOutputStream(created)?.use { output ->
+                temp.inputStream().use { input -> input.copyTo(output, 64 * 1024) }
+            } ?: throw IllegalStateException("No se pudo abrir la salida de MediaStore")
+            // Terminada: se marca no-pendiente y el sistema escanea el archivo.
+            values.clear()
+            values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+            cr.update(created, values, null, null)
+            temp.delete()
+            created
+        } catch (e: Exception) {
+            Log.w("ResonarDown", "Fallo copiando a Music/Resonar: ${e.message}; cae a otro destino")
+            runCatching { cr.delete(created, null, null) }
+            null
+        }
+    }
+
+    /**
+     * ¿Hay una fila de MediaStore con ESTE nombre exacto en Music/Resonar?
+     * Sirve para no duplicar tras reinstalar (el índice se pierde, la carpeta
+     * pública no). Devuelve su Uri si existe y está completa; si hay una fila
+     * muerta (crash a mitad de escritura: casi vacía), la limpia y devuelve null.
+     */
+    private fun reuseExistingInPublicMusic(fileName: String): Uri? {
+        val cr = app.contentResolver
+        val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val row = runCatching {
+            cr.query(
+                collection,
+                arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.SIZE),
+                "${MediaStore.Audio.Media.DISPLAY_NAME}=? AND ${MediaStore.Audio.Media.RELATIVE_PATH}=?",
+                arrayOf(fileName, "Music/Resonar/"),
+                null,
+            )?.use { c ->
+                if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null
+            }
+        }.getOrNull() ?: return null
+        val (id, size) = row
+        val uri = ContentUris.withAppendedId(collection, id)
+        return if (size > 1024) {
+            uri
+        } else {
+            // Fila muerta de un intento anterior: se borra y se baja de nuevo.
+            runCatching { cr.delete(uri, null, null) }
+            null
+        }
+    }
+
+    /** Tamaño registrado de una fila de MediaStore (0 si ya no está). */
+    private fun sizeOfMediaStoreRow(uri: Uri): Long = runCatching {
+        app.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.Audio.Media.SIZE),
+            null,
+            null,
+            null,
+        )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
+    }.getOrDefault(0L)
+
+    /** ¿La fila de MediaStore sigue existiendo? (para el índice y para saber si hay que re-bajar) */
+    fun isMediaStoreEntryAlive(entry: Entry): Boolean =
+        entry.mediaStoreUri?.let { mediaStoreRowExists(Uri.parse(it)) } ?: false
+
+    private fun mediaStoreRowExists(uri: Uri): Boolean = runCatching {
+        app.contentResolver.query(
+            uri,
+            arrayOf(MediaStore.Audio.Media._ID),
+            null,
+            null,
+            null,
+        )?.use { it.moveToFirst() } == true
+    }.getOrDefault(false)
 
     /**
      * Copia el temporal ya descargado a la subcarpeta "Descargas" del árbol SAF elegido.

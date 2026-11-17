@@ -72,6 +72,7 @@ data class PlaybackUiState(
     val dataSaver: Boolean = false,
     val wifiOnlyDownloads: Boolean = false,
     val askDownloadQuality: Boolean = true,
+    val saveToPublicMusic: Boolean = false,
     val eqAvailable: Boolean = false,
     val eqEnabled: Boolean = false,
     val eqPresetName: String = "Apagado",
@@ -108,6 +109,7 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
             dataSaver = store.isDataSaver(),
             wifiOnlyDownloads = store.isWifiOnlyDownloads(),
             askDownloadQuality = store.isAskDownloadQuality(),
+            saveToPublicMusic = store.isSaveToPublicMusic(),
             // La foto ya guardada trae las bandas. Si no se lee al abrir,
             // el interruptor queda prendido y las opciones no aparecen
             // hasta apagarlo y prenderlo otra vez.
@@ -416,6 +418,12 @@ class PlayerConnection(context: Context, private val scope: CoroutineScope) {
     fun setAskDownloadQuality(enabled: Boolean) {
         store.setAskDownloadQuality(enabled)
         _state.update { it.copy(askDownloadQuality = enabled) }
+    }
+
+    /** Descargas a Music/Resonar público (MediaStore): visibles fuera de la app. */
+    fun setSaveToPublicMusic(enabled: Boolean) {
+        store.setSaveToPublicMusic(enabled)
+        _state.update { it.copy(saveToPublicMusic = enabled) }
     }
 
     /**

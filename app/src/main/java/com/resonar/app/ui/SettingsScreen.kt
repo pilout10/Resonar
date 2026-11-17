@@ -202,6 +202,20 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
         )
+        PrefRow(R.drawable.ic_library, "Guardar descargas en Music/", trailing = {
+            Switch(
+                checked = playback.saveToPublicMusic,
+                onCheckedChange = viewModel::setSaveToPublicMusic,
+            )
+        })
+        Text(
+            "Las descargas van a Music/Resonar en el almacenamiento compartido: las ven otros " +
+                "reproductores (YouTube Music, VLC…) y sobreviven a desinstalar la app. " +
+                "Necesita Android 10 o más nuevo; en celulares viejos quedan en la carpeta privada.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+        )
         PrefRow(R.drawable.ic_star, "Preguntar calidad en cada descarga", trailing = {
             Switch(
                 checked = playback.askDownloadQuality,
@@ -251,6 +265,12 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
         PrefRow(R.drawable.ic_speaker, "Seguir sonando si otra app pide el audio", trailing = {
             Switch(checked = playback.keepPlaying, onCheckedChange = viewModel::setKeepPlaying)
         })
+        Text(
+            "Para que la música siga cuando abrís un juego. Dejalo prendido. Si el teléfono corta igual, en Batería poné Resonar sin restricciones.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+        )
 
         SectionLabel("Apariencia")
         PrefRow(R.drawable.ic_theme, "Tema del sistema", trailing = {

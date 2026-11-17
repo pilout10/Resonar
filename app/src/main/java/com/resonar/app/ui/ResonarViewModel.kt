@@ -694,6 +694,7 @@ class ResonarViewModel(app: Application) : AndroidViewModel(app) {
     fun setStreamCache(enabled: Boolean) = playback.setStreamCache(enabled)
     fun setWifiOnlyDownloads(enabled: Boolean) = playback.setWifiOnlyDownloads(enabled)
     fun setAskDownloadQuality(enabled: Boolean) = playback.setAskDownloadQuality(enabled)
+    fun setSaveToPublicMusic(enabled: Boolean) = playback.setSaveToPublicMusic(enabled)
 
     /** Descarga manual: baja todo lo que falte aunque no haya WiFi. */
     fun startSyncNow() = container.librarySyncer.startNow()

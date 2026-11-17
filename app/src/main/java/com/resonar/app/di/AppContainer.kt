@@ -24,8 +24,18 @@ class AppContainer(appContext: Context) {
 
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /** Preferencias de reproducción compartidas (las lee el descargador en cada trabajo). */
+    private val playbackStore = com.resonar.app.player.PlaybackStateStore(appContext)
+
     /** Descarga de temas online al teléfono (botón en los resultados). */
-    val onlineDownloader: OnlineDownloader = OnlineDownloader(appContext)
+    val onlineDownloader: OnlineDownloader = OnlineDownloader(
+        appContext,
+        saveToPublicMusic = {
+            // Preferencia leída EN CADA DESCARGA: cambiar el switch en Ajustes
+            // afecta a la próxima descarga sin reiniciar nada.
+            playbackStore.isSaveToPublicMusic()
+        },
+    )
 
     /**
      * COLA de descargas compartida por pantalla y servicio (Etapa 3). La

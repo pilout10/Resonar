@@ -172,14 +172,23 @@ class LocalLibraryRepository(
         } else {
             emptyList()
         }
-        // Descargas online: las de la carpeta privada se fusionan acá; las que
-        // cayeron en el árbol elegido (Drive) las muestra el escáner de la carpeta.
+        // Descargas online: las de la carpeta privada y las de Music/Resonar
+        // (MediaStore) se fusionan acá; las del árbol elegido (Drive) las
+        // muestra el escáner de la carpeta.
         val downloaded = withContext(Dispatchers.IO) {
             downloads?.allEntries().orEmpty()
                 .filter { it.treeUri == null }
                 .mapNotNull(::entryToTrack)
         }
-        val tracks = (phone + downloaded).sortedBy { it.title.lowercase() }
+        // Si no hay carpeta elegida, el escaneo del teléfono YA trajo las de
+        // Music/Resonar: se sacan de esa lista para que no aparezcan DOS veces
+        // (gana la versión "descarga": su borrado es directo, sin cartel del
+        // sistema; y su ✓ del índice vive igual).
+        val msNames = downloads?.allEntries().orEmpty()
+            .filter { it.mediaStoreUri != null }
+            .mapTo(HashSet()) { it.fileName.lowercase() }
+        val phoneOnly = if (msNames.isEmpty()) phone else phone.filter { it.fileName.lowercase() !in msNames }
+        val tracks = (phoneOnly + downloaded).sortedBy { it.title.lowercase() }
 
         // Agrupamos en una sola pasada: artistas y álbumes.
         val byArtist = tracks.groupBy { it.artistId }
@@ -223,14 +232,24 @@ class LocalLibraryRepository(
      */
     private fun entryToTrack(entry: OnlineDownloader.Entry): LocalTrack? {
         val downloader = downloads ?: return null
-        val file = downloader.fileForEntry(entry)
-        if (!file.exists() || file.length() < 1024) return null
-        val title = entry.title.trim().ifBlank { file.name }
+        // De dónde suena:
+        //  - Music/Resonar (MediaStore): la fila del proveedor ES el archivo;
+        //    si la borraron desde otro reproductor, el tema no está.
+        //  - Carpeta privada: se comprueba el archivo en disco.
+        val uriString = if (entry.mediaStoreUri != null) {
+            if (!downloader.isMediaStoreEntryAlive(entry)) return null
+            entry.mediaStoreUri
+        } else {
+            val file = downloader.fileForEntry(entry)
+            if (!file.exists() || file.length() < 1024) return null
+            android.net.Uri.fromFile(file).toString()
+        }
+        val title = entry.title.trim().ifBlank { entry.fileName }
         val artist = entry.artist.trim().ifBlank { "<Sin artista>" }
-        val (album, albumId) = GroupIds.albumIdentity("", "", file.name, title)
+        val (album, albumId) = GroupIds.albumIdentity("", "", entry.fileName, title)
         return LocalTrack(
             id = stableNegativeId("online|${entry.mediaId}"),
-            uri = android.net.Uri.fromFile(file).toString(),
+            uri = uriString,
             title = title,
             artist = artist,
             album = album,
@@ -239,11 +258,11 @@ class LocalLibraryRepository(
             durationMs = entry.durationMs ?: 0L,
             trackNo = 0,
             folder = "Descargas",
-            fileName = file.name,
+            fileName = entry.fileName,
             sourceRank = 0,
             year = 0,
             genre = "",
-            searchBlob = normalizeForSearch("$title $artist ${file.name} Descargas"),
+            searchBlob = normalizeForSearch("$title $artist ${entry.fileName} Descargas"),
             fromDownloads = true,
             artUrl = entry.artUrl,
         )
