@@ -56,16 +56,21 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
     }
     var qualitySheet by remember { mutableStateOf(false) }
     var libraryDialog by remember { mutableStateOf(false) }
+    // Subpáginas (reorganización de Ajustes): la lista principal queda corta y
+    // cada grupo (reproducción, descargas, fuentes…) se abre aparte.
+    var subPage by remember { mutableStateOf<SettingsPage?>(null) }
     val systemTheme = playback.themeMode == "system"
     // Este cartel se compone antes que el atrás de AppShell. Si Ajustes también
     // registrara el suyo allá, el de afuera ganaría y cerraría toda la pantalla
     // con la hoja de calidad todavía abierta.
     BackHandler {
-        if (qualitySheet || libraryDialog) {
-            qualitySheet = false
-            libraryDialog = false
-        } else {
-            onBack()
+        when {
+            qualitySheet || libraryDialog -> {
+                qualitySheet = false
+                libraryDialog = false
+            }
+            subPage != null -> subPage = null
+            else -> onBack()
         }
     }
 
@@ -76,6 +81,8 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
+    when (subPage) {
+    null -> {
     Column(
         Modifier
             .fillMaxSize()
@@ -112,205 +119,44 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             }
         }
 
-        SectionLabel("Música")
+        // GRUPOS: cada entrada abre su propia subpágina. Así la lista principal
+        // queda en una pantalla y los detalles viven donde corresponde.
+        SectionLabel("Ajustes")
+        PrefRow(
+            R.drawable.ic_eq,
+            "Reproducción",
+            "Calidad ${qualityLabel(playback.audioQuality)}",
+            onClick = { subPage = SettingsPage.REPRODUCTION },
+        )
+        PrefRow(
+            R.drawable.ic_download,
+            "Descargas",
+            if (playback.wifiOnlyDownloads) "Solo Wi-Fi" else null,
+            onClick = { subPage = SettingsPage.DOWNLOADS },
+        )
         PrefRow(
             R.drawable.ic_library,
-            "Carpeta de música",
+            "Música del teléfono",
             if (library.musicFolderLabel.isBlank()) "Todo el teléfono" else library.musicFolderLabel,
-            onClick = viewModel::chooseMusicFolder,
+            onClick = { subPage = SettingsPage.PHONE },
         )
-        Text(
-            if (library.musicFolderLabel.isBlank()) {
-                "Elegí la carpeta donde están, o van a estar, las canciones. Mientras no elijas una, se muestra todo el teléfono menos WhatsApp."
-            } else {
-                "Solo esta carpeta y sus subcarpetas. FLAC entra. Si es Google Drive, hace falta internet y Actualizar."
+        val activeSources = enabledSources.values.count { it }
+        PrefRow(
+            R.drawable.ic_search,
+            "Fuentes en línea",
+            "$activeSources de ${sourceToggles.size}",
+            onClick = { subPage = SettingsPage.SOURCES },
+        )
+        PrefRow(
+            R.drawable.ic_theme,
+            "Apariencia y sistema",
+            when (playback.themeMode) {
+                "system" -> "Sistema"
+                "light" -> "Claro"
+                else -> "Oscuro"
             },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 4.dp),
+            onClick = { subPage = SettingsPage.APPEARANCE },
         )
-        if (library.musicFolderLabel.isNotBlank()) {
-            TextButton(onClick = viewModel::clearMusicFolder) { Text("Usar todo el teléfono") }
-        }
-
-        SectionLabel("Fuentes en línea")
-        Text(
-            "De dónde sale la música cuando buscás en la pestaña \"En línea\". Si una fuente da problemas, se puede apagar acá.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        sourceToggles.forEach { (id, name) ->
-            PrefRow(R.drawable.ic_music, name, trailing = {
-                Switch(
-                    checked = enabledSources[id] ?: true,
-                    onCheckedChange = { viewModel.setSourceEnabled(id, it) },
-                )
-            })
-        }
-        val pendingKeys = viewModel.pendingKeySources()
-        if (pendingKeys.isNotEmpty()) {
-            Text(
-                "${pendingKeys.joinToString(", ")} necesita una API key propia " +
-                    "(se pide gratis en el portal del servicio y se carga en local.properties). " +
-                    "Sin key, esa fuente simplemente no se usa y el resto sigue igual.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-            )
-        }
-        if (enabledSources["youtube"] == true) {
-            Text(
-                // Licencia y honestidad al usuario: NewPipeExtractor es GPLv3 y
-                // YouTube puede fallar sin previo aviso (poToken, cambios de la web).
-                "YouTube entra vía NewPipeExtractor (GPLv3: por usarla, Resonar también es GPLv3). " +
-                    "YouTube cambia su web seguido: si la fuente falla, es el servicio, no la app.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-            )
-        }
-
-        SectionLabel("Reproducción")
-        PrefRow(
-            R.drawable.ic_eq,
-            "Calidad de audio",
-            qualityLabel(playback.audioQuality),
-            onClick = { qualitySheet = true },
-        )
-        // RADIO AUTOMÁTICA (Etapa 4): la cola que se repone sola.
-        PrefRow(R.drawable.ic_shuffle, "Radio automática", trailing = {
-            Switch(checked = playback.autoRadio, onCheckedChange = viewModel::setAutoRadio)
-        })
-        Text(
-            "Cuando la cola termina, Resonar suma sola más canciones parecidas: " +
-                "primero del mismo artista o género de tu música; si falta, busca en línea. " +
-                "Con «Repetir» activado, la radio no interviene.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        PrefRow(R.drawable.ic_download, "Descarga automática", trailing = {
-            Switch(checked = playback.autoDownload, onCheckedChange = viewModel::setAutoDownload)
-        })
-        Text(
-            "Con WiFi, baja los temas de la nube (Drive) al teléfono para que suenen al toque y sin internet. " +
-                "Si tu carpeta es del propio teléfono, no hace nada: esos archivos ya están en el disco.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        // ETAPA 3 (parte 2): ajustes de las descargas de la búsqueda online.
-        PrefRow(R.drawable.ic_download, "Descargas solo por Wi-Fi", trailing = {
-            Switch(
-                checked = playback.wifiOnlyDownloads,
-                onCheckedChange = viewModel::setWifiOnlyDownloads,
-            )
-        })
-        Text(
-            "Si lo prendés, las descargas de la búsqueda NO arrancan con datos móviles: " +
-                "la app te avisa en el momento y la descarga queda sin iniciar.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        PrefRow(R.drawable.ic_library, "Guardar descargas en Music/", trailing = {
-            Switch(
-                checked = playback.saveToPublicMusic,
-                onCheckedChange = viewModel::setSaveToPublicMusic,
-            )
-        })
-        Text(
-            "Las descargas van a Music/Resonar en el almacenamiento compartido: las ven otros " +
-                "reproductores (YouTube Music, VLC…) y sobreviven a desinstalar la app. " +
-                "Necesita Android 10 o más nuevo; en celulares viejos quedan en la carpeta privada.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        PrefRow(R.drawable.ic_star, "Preguntar calidad en cada descarga", trailing = {
-            Switch(
-                checked = playback.askDownloadQuality,
-                onCheckedChange = viewModel::setAskDownloadQuality,
-            )
-        })
-        Text(
-            "Apagado, no se abre la hoja de calidades: se baja siempre la mejor versión que ofrece la fuente. " +
-                "Las fuentes que solo tienen una versión (YouTube, Audius) nunca preguntan igual.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        PrefRow(R.drawable.ic_chart, "Caché de streaming", trailing = {
-            Switch(checked = playback.streamCache, onCheckedChange = viewModel::setStreamCache)
-        })
-        Text(
-            "Guarda en el teléfono lo que vas escuchando de la nube (hasta 256 MB; lo viejo se borra solo). " +
-                "Con esto apagado, Drive vuelve a tardar en cada tema. Es independiente de la descarga automática.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        if (sync.total > 0) {
-            SyncProgressCard(
-                sync = sync,
-                onDownloadNow = viewModel::startSyncNow,
-                onPause = viewModel::pauseSync,
-                onResume = viewModel::resumeSync,
-            )
-        }
-        PrefRow(R.drawable.ic_chart, "Modo ahorro de datos", trailing = {
-            Switch(checked = playback.dataSaver, onCheckedChange = viewModel::setDataSaver)
-        })
-        Text(
-            "Pide carátulas más chicas para usar menos memoria.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-        PrefRow(
-            R.drawable.ic_eq,
-            "Ecualizador",
-            if (!playback.eqAvailable) "Al reproducir" else playback.eqPresetName,
-            onClick = viewModel::openEqualizer,
-        )
-        PrefRow(R.drawable.ic_speaker, "Seguir sonando si otra app pide el audio", trailing = {
-            Switch(checked = playback.keepPlaying, onCheckedChange = viewModel::setKeepPlaying)
-        })
-        Text(
-            "Para que la música siga cuando abrís un juego. Dejalo prendido. Si el teléfono corta igual, en Batería poné Resonar sin restricciones.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
-        )
-
-        SectionLabel("Apariencia")
-        PrefRow(R.drawable.ic_theme, "Tema del sistema", trailing = {
-            Switch(
-                checked = systemTheme,
-                onCheckedChange = { viewModel.setThemeMode(if (it) "system" else "dark") },
-            )
-        })
-        PrefRow(R.drawable.ic_theme, "Tema oscuro", trailing = {
-            Switch(
-                // Solo "dark" está prendido: con "Tema del sistema" el color lo
-                // manda Android, así que el interruptor no debe mentir.
-                checked = playback.themeMode == "dark",
-                enabled = !systemTheme,
-                onCheckedChange = { viewModel.setThemeMode(if (it) "dark" else "light") },
-            )
-        })
-        PrefRow(R.drawable.ic_language, "Idioma", "Español", onClick = viewModel::openLanguageNote)
-
-        SectionLabel("Dispositivo")
-        PrefRow(
-            R.drawable.ic_battery,
-            "Batería",
-            if (playback.batteryExempt) "Sin restricciones" else "Restringida",
-            onClick = viewModel::openBatterySettings,
-        )
-        PrefRow(R.drawable.ic_battery, "Pedir sin restricciones", onClick = viewModel::requestBatteryExemption)
-        PrefRow(R.drawable.ic_library, "Actualizar biblioteca", if (library.loading) "Escaneando…" else null, onClick = viewModel::refreshLibrary)
 
         SectionLabel("Acerca de")
         PrefRow(R.drawable.ic_music, "Versión", BuildConfig.VERSION_NAME)
@@ -323,6 +169,220 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
             )
         }
     }
+        }
+
+        SettingsPage.REPRODUCTION -> SettingsSubPage("Reproducción", onBack = { subPage = null }) {
+            PrefRow(
+                R.drawable.ic_eq,
+                "Calidad de audio",
+                qualityLabel(playback.audioQuality),
+                onClick = { qualitySheet = true },
+            )
+            // RADIO AUTOMÁTICA (Etapa 4): la cola que se repone sola.
+            PrefRow(R.drawable.ic_shuffle, "Radio automática", trailing = {
+                Switch(checked = playback.autoRadio, onCheckedChange = viewModel::setAutoRadio)
+            })
+            Text(
+                "Cuando la cola termina, Resonar suma sola más canciones parecidas: " +
+                    "primero del mismo artista o género de tu música; si falta, busca en línea. " +
+                    "Con «Repetir» activado, la radio no interviene.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            PrefRow(
+                R.drawable.ic_eq,
+                "Ecualizador",
+                if (!playback.eqAvailable) "Al reproducir" else playback.eqPresetName,
+                onClick = viewModel::openEqualizer,
+            )
+            PrefRow(R.drawable.ic_chart, "Caché de streaming", trailing = {
+                Switch(checked = playback.streamCache, onCheckedChange = viewModel::setStreamCache)
+            })
+            Text(
+                "Guarda en el teléfono lo que vas escuchando de la nube (hasta 256 MB; lo viejo se borra solo). " +
+                    "Con esto apagado, Drive vuelve a tardar en cada tema. Es independiente de la descarga automática.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            PrefRow(R.drawable.ic_chart, "Modo ahorro de datos", trailing = {
+                Switch(checked = playback.dataSaver, onCheckedChange = viewModel::setDataSaver)
+            })
+            Text(
+                "Pide carátulas más chicas para usar menos memoria.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            PrefRow(R.drawable.ic_speaker, "Seguir sonando si otra app pide el audio", trailing = {
+                Switch(checked = playback.keepPlaying, onCheckedChange = viewModel::setKeepPlaying)
+            })
+            Text(
+                "Para que la música siga cuando abrís un juego. Dejalo prendido. Si el teléfono corta igual, en Batería poné Resonar sin restricciones.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+        }
+
+        SettingsPage.DOWNLOADS -> SettingsSubPage("Descargas", onBack = { subPage = null }) {
+            PrefRow(R.drawable.ic_download, "Descarga automática", trailing = {
+                Switch(checked = playback.autoDownload, onCheckedChange = viewModel::setAutoDownload)
+            })
+            Text(
+                "Con WiFi, baja los temas de la nube (Drive) al teléfono para que suenen al toque y sin internet. " +
+                    "Si tu carpeta es del propio teléfono, no hace nada: esos archivos ya están en el disco.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            if (sync.total > 0) {
+                SyncProgressCard(
+                    sync = sync,
+                    onDownloadNow = viewModel::startSyncNow,
+                    onPause = viewModel::pauseSync,
+                    onResume = viewModel::resumeSync,
+                )
+            }
+            // ETAPA 3 (parte 2): ajustes de las descargas de la búsqueda online.
+            PrefRow(R.drawable.ic_download, "Descargas solo por Wi-Fi", trailing = {
+                Switch(
+                    checked = playback.wifiOnlyDownloads,
+                    onCheckedChange = viewModel::setWifiOnlyDownloads,
+                )
+            })
+            Text(
+                "Si lo prendés, las descargas de la búsqueda NO arrancan con datos móviles: " +
+                    "la app te avisa en el momento y la descarga queda sin iniciar.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            PrefRow(R.drawable.ic_star, "Preguntar calidad en cada descarga", trailing = {
+                Switch(
+                    checked = playback.askDownloadQuality,
+                    onCheckedChange = viewModel::setAskDownloadQuality,
+                )
+            })
+            Text(
+                "Apagado, no se abre la hoja de calidades: se baja siempre la mejor versión que ofrece la fuente. " +
+                    "Las fuentes que solo tienen una versión (YouTube, Audius) nunca preguntan igual.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            PrefRow(R.drawable.ic_library, "Guardar descargas en Music/", trailing = {
+                Switch(
+                    checked = playback.saveToPublicMusic,
+                    onCheckedChange = viewModel::setSaveToPublicMusic,
+                )
+            })
+            Text(
+                "Las descargas van a Music/Resonar en el almacenamiento compartido: las ven otros " +
+                    "reproductores (YouTube Music, VLC…) y sobreviven a desinstalar la app. " +
+                    "Necesita Android 10 o más nuevo; en celulares viejos quedan en la carpeta privada.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+        }
+
+        SettingsPage.PHONE -> SettingsSubPage("Música del teléfono", onBack = { subPage = null }) {
+            PrefRow(
+                R.drawable.ic_library,
+                "Carpeta de música",
+                if (library.musicFolderLabel.isBlank()) "Todo el teléfono" else library.musicFolderLabel,
+                onClick = viewModel::chooseMusicFolder,
+            )
+            Text(
+                if (library.musicFolderLabel.isBlank()) {
+                    "Elegí la carpeta donde están, o van a estar, las canciones. Mientras no elijas una, se muestra todo el teléfono menos WhatsApp."
+                } else {
+                    "Solo esta carpeta y sus subcarpetas. FLAC entra. Si es Google Drive, hace falta internet y Actualizar."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 4.dp),
+            )
+            if (library.musicFolderLabel.isNotBlank()) {
+                TextButton(onClick = viewModel::clearMusicFolder) { Text("Usar todo el teléfono") }
+            }
+            PrefRow(
+                R.drawable.ic_library,
+                "Actualizar biblioteca",
+                if (library.loading) "Escaneando…" else null,
+                onClick = viewModel::refreshLibrary,
+            )
+        }
+
+        SettingsPage.SOURCES -> SettingsSubPage("Fuentes en línea", onBack = { subPage = null }) {
+            Text(
+                "De dónde sale la música cuando buscás en la pestaña \"En línea\". Si una fuente da problemas, se puede apagar acá.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+            )
+            sourceToggles.forEach { (id, name) ->
+                PrefRow(R.drawable.ic_music, name, trailing = {
+                    Switch(
+                        checked = enabledSources[id] ?: true,
+                        onCheckedChange = { viewModel.setSourceEnabled(id, it) },
+                    )
+                })
+            }
+            val pendingKeys = viewModel.pendingKeySources()
+            if (pendingKeys.isNotEmpty()) {
+                Text(
+                    "${pendingKeys.joinToString(", ")} necesita una API key propia " +
+                        "(se pide gratis en el portal del servicio y se carga en local.properties). " +
+                        "Sin key, esa fuente simplemente no se usa y el resto sigue igual.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+                )
+            }
+            if (enabledSources["youtube"] == true) {
+                Text(
+                    // Licencia y honestidad al usuario: NewPipeExtractor es GPLv3 y
+                    // YouTube puede fallar sin previo aviso (poToken, cambios de la web).
+                    "YouTube entra vía NewPipeExtractor (GPLv3: por usarla, Resonar también es GPLv3). " +
+                        "YouTube cambia su web seguido: si la fuente falla, es el servicio, no la app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 52.dp, end = 8.dp, bottom = 8.dp),
+                )
+            }
+        }
+
+        SettingsPage.APPEARANCE -> SettingsSubPage("Apariencia y sistema", onBack = { subPage = null }) {
+            PrefRow(R.drawable.ic_theme, "Tema del sistema", trailing = {
+                Switch(
+                    checked = systemTheme,
+                    onCheckedChange = { viewModel.setThemeMode(if (it) "system" else "dark") },
+                )
+            })
+            PrefRow(R.drawable.ic_theme, "Tema oscuro", trailing = {
+                Switch(
+                    // Solo "dark" está prendido: con "Tema del sistema" el color lo
+                    // manda Android, así que el interruptor no debe mentir.
+                    checked = playback.themeMode == "dark",
+                    enabled = !systemTheme,
+                    onCheckedChange = { viewModel.setThemeMode(if (it) "dark" else "light") },
+                )
+            })
+            PrefRow(R.drawable.ic_language, "Idioma", "Español", onClick = viewModel::openLanguageNote)
+
+            SectionLabel("Dispositivo")
+            PrefRow(
+                R.drawable.ic_battery,
+                "Batería",
+                if (playback.batteryExempt) "Sin restricciones" else "Restringida",
+                onClick = viewModel::openBatterySettings,
+            )
+            PrefRow(R.drawable.ic_battery, "Pedir sin restricciones", onClick = viewModel::requestBatteryExemption)
+        }
+        }
 
         if (qualitySheet) {
             BottomChoice(
@@ -374,6 +434,34 @@ fun SettingsScreen(viewModel: ResonarViewModel, playback: PlaybackUiState, onBac
                 }
             }
         }
+    }
+}
+
+/** Grupos de Ajustes: la lista raíz es corta y cada grupo vive en su subpágina. */
+private enum class SettingsPage { REPRODUCTION, DOWNLOADS, PHONE, SOURCES, APPEARANCE }
+
+/**
+ * Subpágina de Ajustes: fila de volver + contenido deslizable, con el mismo
+ * ancho y padding que la lista raíz para que no se sienta otra pantalla.
+ */
+@Composable
+private fun SettingsSubPage(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = rootNavigationBottom())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(painterResource(R.drawable.ic_back), contentDescription = "Volver")
+            }
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        }
+        content()
+        Spacer(Modifier.size(24.dp))
     }
 }
 
