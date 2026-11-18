@@ -21,12 +21,25 @@ Si algo externo se rompe (sobre todo YouTube), el procedimiento está en
   256 MB con desalojo LRU).
 - **Reproducción**: Media3 + MediaSession. Reanuda desde donde quedaste, cola,
   shuffle, repeat, ecualizador del sistema, pantalla de bloqueo y notificación.
-- **Búsqueda en línea**: Audius, Internet Archive y YouTube (vía NewPipeExtractor),
-  con filtro de música (canciones / videos) y botón de descarga.
-- **Descargas**: se guardan en `Descargas/` dentro de la carpeta elegida (Drive) o,
-  si no hay carpeta elegida, en la privada de la app. Se ven en "Tu música".
+- **Búsqueda en línea**: YouTube (vía NewPipeExtractor), Audius, ccMixter,
+  Openverse, Internet Archive y Jamendo (con key propia) — en paralelo, con
+  filtro de música (canciones / videos) y botón de descarga.
+- **Descargas**: se guardan en `Descargas/` dentro de la carpeta elegida (Drive),
+  en `Music/Resonar` (opción "Guardar en Music/", visible por otros
+  reproductores), o en la privada de la app. Servicio en primer plano con
+  pausa/reanudar, reintento automático y opción "solo por Wi-Fi". Se ven en
+  "Tu música".
 - **Borrado limpio**: al borrar una canción se borra su copia local y su caché;
   en Drive va a la papelera (se puede recuperar).
+- **Radio automática** (opcional): cuando la cola termina, suma sola canciones
+  parecidas — mismo artista, tu biblioteca, o búsqueda en línea. Anti-duplicado
+  por id y por título+artista normalizado.
+- **Temporizador de sueño**: 15/30/45/60 min o "al terminar esta canción".
+- **Ajustes por grupos** con subpáginas, ecualizador, calidad de audio, ahorro
+  de datos y más.
+- **Robustez auditada**: respuestas de red con tope de tamaño, validación de
+  que lo bajado sea audio de verdad, cola de descargas sin carreras de datos.
+  Cubierto por 21 tests de unidad (`gradlew testDebugUnitTest`).
 
 ## Qué NO hace todavía (honestidad)
 
@@ -41,9 +54,22 @@ Si algo externo se rompe (sobre todo YouTube), el procedimiento está en
 - **YouTube** puede dejar de funcionar de un día a otro (cambios del sitio,
   verificaciones anti-bot). No es un bug de la app; Audius e Internet Archive
   no dependen de ese servicio.
-- La app **no tiene historial de versiones published**: no hay Git instalado en la máquina
-  donde se desarrolla. Hay respaldos en `../respaldos/` y un `.gitignore` listo
-  para cuando se instale.
+
+## Descargar la app (APK)
+
+Los APK firmados se publican en
+[Releases](https://github.com/pilout10/Resonar/releases): descargar, tocar el
+archivo y permitir "instalar de fuentes desconocidas". Cada APK está firmado
+con una clave de release propia; las actualizaciones se instalan encima sin
+perder datos (si la clave cambia, hay que reinstalar — por eso la clave vive
+respaldada FUERA de este repositorio, junto con su contraseña en
+`local.properties`, que no se versiona). Compilar el release:
+
+```
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+.\gradlew.bat assembleRelease --console=plain
+# APK: app/build/outputs/apk/release/app-release.apk
+```
 
 ## Fuentes en línea (buscador federado)
 
