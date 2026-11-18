@@ -27,19 +27,47 @@ object RadioSeed {
     private const val TAKE = 8
 
     /**
-     * Clave anti-duplicado por contenido: "tema|artista" en minúsculas y sin
-     * tildes. El id solo alcanza si el mismo archivo entra dos veces, pero la
-     * MISMA canción puede estar en la cola con ids distintos (la copia
-     * descargada de un tema online, o la misma búsqueda de la radio que ya
-     * estaba como archivo local). Por eso la radio compara también esto.
+     * Clave anti-duplicado por contenido: "tema|artista" normalizada. El id
+     * solo alcanza si el mismo archivo entra dos veces, pero la MISMA canción
+     * puede estar en la cola con ids distintos (la copia descargada de un tema
+     * online, o la misma búsqueda de la radio que ya estaba como archivo
+     * local). Por eso la radio compara también esto.
+     *
+     * La normalización limpia el ruido típico de re-subidas que no aporta
+     * identidad: "official video", "letra/lyrics", "y2mate.com", paréntesis y
+     * signos, y el nombre del artista pegado al título ("Tal Vez Paulo
+     * Londra" → "tal vez"). No es 100 %: re-subidas con metadatos peor
+     * armados siguen escapándose (documentado en el INFORME).
      */
     fun queueKey(title: CharSequence?, artist: CharSequence?): String? {
-        val t = title?.toString()?.trim()?.lowercase() ?: return null
-        if (t.isEmpty()) return null
-        val a = artist?.toString()?.trim()?.lowercase().orEmpty()
+        val t = title?.toString() ?: return null
+        if (t.isBlank()) return null
+        val a = artist?.toString().orEmpty()
+        val titTok = cleanTokens(t, cleanTokens(a))
+        val artTok = cleanTokens(a)
+        if (titTok.isEmpty()) return null
+        return (titTok.joinToString(" ") + "|" + artTok.joinToString(" "))
+    }
+
+    /** Palabras que no identifican una versión de una canción. */
+    private val ruido = setOf(
+        "official", "oficial", "video", "audio", "letra", "lyrics", "lyric",
+        "videoclip", "clip", "hd", "hq", "y2mate", "y2matecom",
+    )
+
+    /** Minúsculas, sin tildes, troceado por signos, sin palabras de ruido. */
+    private fun cleanTokens(text: String, quitar: List<String> = emptyList()): List<String> {
+        if (text.isBlank()) return emptyList()
         val sinTilde = Regex("\\p{Mn}+")
-        return Normalizer.normalize(t, Normalizer.Form.NFD).replace(sinTilde, "") +
-            "|" + Normalizer.normalize(a, Normalizer.Form.NFD).replace(sinTilde, "")
+        val plano = Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD).replace(sinTilde, "")
+        var tokens = plano.split(Regex("[^\\p{L}\\p{Nd}]+")).filter { it.isNotEmpty() && it !in ruido }
+        // El artista pegado al título ("tal vez paulo londra" + artista
+        // "paulo londra"): lo saco si aparece tal cual al inicio o al final.
+        if (quitar.isNotEmpty() && tokens.size > quitar.size) {
+            if (tokens.take(quitar.size) == quitar) tokens = tokens.drop(quitar.size)
+            else if (tokens.takeLast(quitar.size) == quitar) tokens = tokens.dropLast(quitar.size)
+        }
+        return tokens
     }
 
     suspend fun build(
