@@ -15,6 +15,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.resonar.app.data.RadioSeed
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -108,7 +109,8 @@ class PlayerConnection(
         seedArtist: String?,
         seedTitle: String?,
         excludeMediaIds: Set<String>,
-    ) -> List<MediaItem> = { _, _, _, _ -> emptyList() },
+        queueKeys: Set<String>,
+    ) -> List<MediaItem> = { _, _, _, _, _ -> emptyList() },
 ) {
 
     private val app: Context = context.applicationContext
@@ -515,7 +517,16 @@ class PlayerConnection(
                 val exclude = buildSet {
                     for (index in 0 until c.mediaItemCount) add(c.getMediaItemAt(index).mediaId)
                 }
-                val items = radioSeed(seed.currentMediaId, seed.currentArtist, seed.currentTitle, exclude)
+                // Anti-duplicado por contenido: la misma canción puede entrar
+                // con ids distintos (copia descargada escaneada, o la búsqueda
+                // online que devuelve el tema que ya está como archivo local).
+                val queueKeys = buildSet {
+                    for (index in 0 until c.mediaItemCount) {
+                        val meta = c.getMediaItemAt(index).mediaMetadata
+                        RadioSeed.queueKey(meta.title, meta.artist)?.let { add(it) }
+                    }
+                }
+                val items = radioSeed(seed.currentMediaId, seed.currentArtist, seed.currentTitle, exclude, queueKeys)
                 if (items.isEmpty()) return@launch
                 val start = c.mediaItemCount
                 c.addMediaItems(start, items)

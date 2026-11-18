@@ -5,6 +5,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.resonar.app.online.OnlineRepository
 import com.resonar.app.online.OnlineTrack
+import java.text.Normalizer
 
 /**
  * RADIO AUTOMÁTICA (Etapa 4): qué temas sumar cuando la cola termina.
@@ -25,6 +26,22 @@ object RadioSeed {
     /** Cuántos temas agrega la radio por tanda. */
     private const val TAKE = 8
 
+    /**
+     * Clave anti-duplicado por contenido: "tema|artista" en minúsculas y sin
+     * tildes. El id solo alcanza si el mismo archivo entra dos veces, pero la
+     * MISMA canción puede estar en la cola con ids distintos (la copia
+     * descargada de un tema online, o la misma búsqueda de la radio que ya
+     * estaba como archivo local). Por eso la radio compara también esto.
+     */
+    fun queueKey(title: CharSequence?, artist: CharSequence?): String? {
+        val t = title?.toString()?.trim()?.lowercase() ?: return null
+        if (t.isEmpty()) return null
+        val a = artist?.toString()?.trim()?.lowercase().orEmpty()
+        val sinTilde = Regex("\\p{Mn}+")
+        return Normalizer.normalize(t, Normalizer.Form.NFD).replace(sinTilde, "") +
+            "|" + Normalizer.normalize(a, Normalizer.Form.NFD).replace(sinTilde, "")
+    }
+
     suspend fun build(
         library: LocalLibraryRepository,
         syncer: LibrarySyncer,
@@ -33,9 +50,14 @@ object RadioSeed {
         seedArtist: String?,
         seedTitle: String?,
         excludeMediaIds: Set<String>,
+        queueKeys: Set<String>,
     ): List<MediaItem> {
         val tracks = library.state.value.tracks
-        fun excluded(track: LocalTrack) = "local:${track.id}" in excludeMediaIds
+        fun excluded(track: LocalTrack): Boolean {
+            if ("local:${track.id}" in excludeMediaIds) return true
+            val key = queueKey(track.title, track.artist)
+            return key != null && key in queueKeys
+        }
 
         val seedTrack = seedMediaId?.removePrefix("local:")?.toLongOrNull()
             ?.let { id -> tracks.firstOrNull { it.id == id } }
@@ -67,7 +89,11 @@ object RadioSeed {
                 val results = runCatching { online.federatedSearch(query.trim()) }.getOrNull()
                 val candidates = results?.results.orEmpty()
                     .map { it.primary }
-                    .filter { it.mediaId !in excludeMediaIds }
+                    .filter { track ->
+                        if (track.mediaId in excludeMediaIds) return@filter false
+                        val key = queueKey(track.title, track.artist)
+                        key == null || key !in queueKeys
+                    }
                 for (track in candidates) {
                     if (items.size >= TAKE) break
                     // Cada stream se resuelve antes de entrar a la cola: si

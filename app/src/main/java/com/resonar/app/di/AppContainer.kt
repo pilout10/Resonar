@@ -61,7 +61,7 @@ class AppContainer(appContext: Context) {
         // RADIO AUTOMÁTICA (Etapa 4): candidatos parecidos cuando la cola
         // termina. Lambdas tardías: librarySyncer y onlineRepository se
         // declaran más abajo y solo se usan cuando la radio los necesita.
-        radioSeed = { seedMediaId, seedArtist, seedTitle, exclude ->
+        radioSeed = { seedMediaId, seedArtist, seedTitle, exclude, queueKeys ->
             RadioSeed.build(
                 libraryRepository,
                 librarySyncer,
@@ -70,6 +70,7 @@ class AppContainer(appContext: Context) {
                 seedArtist,
                 seedTitle,
                 exclude,
+                queueKeys,
             )
         },
     )
