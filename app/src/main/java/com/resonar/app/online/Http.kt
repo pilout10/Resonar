@@ -48,11 +48,37 @@ object Http {
                 if (conn.responseCode !in 200..299) {
                     throw IllegalStateException("HTTP ${conn.responseCode} en $url")
                 }
-                conn.inputStream.bufferedReader().use { it.readText() }
+                readCapped(conn.inputStream)
             } finally {
                 conn.disconnect()
             }
         }
+
+    /**
+     * TOPE DE TAMAÑO DE RESPUESTA (auditoría): ninguna API de las 6 fuentes
+     * devuelve más que esto en sus respuestas de metadatos. Sin tope, un
+     * servidor roto o malicioso podría mandar cientos de MB de "JSON" y la
+     * app intentaría cargarlo entero en RAM: en un teléfono de 2 GB es un
+     * cierre forzoso.
+     */
+    private const val MAX_RESPONSE_BYTES = 2_000_000
+
+    /** Lee el stream con tope; si lo pasa, falla fuerte en vez de llenar la RAM. */
+    private fun readCapped(input: java.io.InputStream): String {
+        val acumulado = java.io.ByteArrayOutputStream()
+        val trozo = ByteArray(8 * 1024)
+        input.use { stream ->
+            while (true) {
+                val n = stream.read(trozo)
+                if (n < 0) break
+                if (acumulado.size() + n > MAX_RESPONSE_BYTES) {
+                    throw IllegalStateException("Respuesta demasiado grande (> 2 MB)")
+                }
+                acumulado.write(trozo, 0, n)
+            }
+        }
+        return acumulado.toString("UTF-8")
+    }
 
     /**
      * GET con un User-Agent propio. Hay servicios (MusicBrainz, por ejemplo) que

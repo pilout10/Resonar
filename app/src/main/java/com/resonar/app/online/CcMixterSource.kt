@@ -5,11 +5,11 @@ import android.util.Log
 import java.net.URLEncoder
 
 /**
- * FUENTE CCMIXTER — API OFICIAL keyless (http://ccmixter.org/api/query).
+ * FUENTE CCMIXTER — API OFICIAL keyless (https://ccmixter.org/api/query).
  * Música con licencia Creative Commons, en general completa (MP3 y FLAC).
  *
  * Qué anda:
- *  - Búsqueda: GET http://ccmixter.org/api/query?f=json&limit=25&search=<q>&offset=N
+ *  - Búsqueda: GET https://ccmixter.org/api/query?f=json&limit=25&search=<q>&offset=N
  *    (también acepta "tags=" y "artist="). Devuelve un arreglo plano con
  *    upload_id, upload_name, user_name/user_real_name, license_name, license_url
  *    y "files[]" (cada archivo con download_url, file_format_info y tamaño).

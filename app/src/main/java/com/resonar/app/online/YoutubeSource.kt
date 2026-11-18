@@ -208,7 +208,16 @@ class NpeHttpDownloader : Downloader() {
         }
         request.headers().forEach { (name, values) -> values.forEach { builder.header(name, it) } }
         client.newCall(builder.build()).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
+            // TOPE DE TAMAÑO (auditoría): el extractor pide páginas web y JSON;
+            // ninguna supera 2 MB. Sin tope, `body.string()` cargaría en RAM
+            // lo que el servidor mande — un teléfono de 2 GB no se lo banca.
+            val text = resp.body?.source()?.use { src ->
+                src.request(MAX_RESPONSE_BYTES + 1L)
+                if (src.buffer.size > MAX_RESPONSE_BYTES) {
+                    throw IllegalStateException("Respuesta de YouTube demasiado grande (> 2 MB)")
+                }
+                String(src.buffer.readByteArray(), Charsets.UTF_8)
+            } ?: ""
             return Response(
                 resp.code,
                 resp.message.orEmpty(),
@@ -217,5 +226,9 @@ class NpeHttpDownloader : Downloader() {
                 resp.request.url.toString(),
             )
         }
+    }
+
+    private companion object {
+        const val MAX_RESPONSE_BYTES = 2_000_000L
     }
 }

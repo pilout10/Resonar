@@ -5,8 +5,10 @@ import com.resonar.app.online.OnlineTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * COLA DE DESCARGAS compartida por TODO el proceso: la pantalla la mira, el
@@ -38,11 +40,16 @@ class DownloadHub {
     private val _jobs = MutableStateFlow<List<DownloadJobUi>>(emptyList())
     val jobs: StateFlow<List<DownloadJobUi>> = _jobs.asStateFlow()
 
-    /** Ids de cancelación pedida. El worker lo consulta en cada trozo bajado. */
-    private val cancelRequested = HashSet<String>()
+    /**
+     * Ids de cancelación/pausa pedida. El worker los consulta en cada trozo
+     * bajado DESDE OTRO HILO, así que son sets concurrentes: un HashSet común
+     * no garantiza que el worker vea el flag recién puesto (sin sincronización
+     * la JVM puede servirle el valor viejo) → "cancelé y siguió bajando".
+     */
+    private val cancelRequested: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** Ids de pausa pedida. Igual que cancelar pero conservando el estado para retomar. */
-    private val pauseRequested = HashSet<String>()
+    private val pauseRequested: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val mutex = Mutex()
 
     /**
@@ -107,9 +114,12 @@ class DownloadHub {
         cancelRequested.remove(id)
         pauseRequested.add(id)
         // Si todavía no arrancó, se marca PAUSED acá mismo (el worker ni lo agarra).
-        val current = _jobs.value.firstOrNull { it.id == id }
-        if (current != null && current.status == DownloadStatus.PENDING) {
-            update(id) { it.copy(status = DownloadStatus.PAUSED) }
+        // AUDITORÍA: check-then-act atómico — antes leía el estado, decidía y
+        // volvía a escribir en pasos separados; otro hilo podía colarse en el medio.
+        _jobs.update { current ->
+            current.map { job ->
+                if (job.id == id && job.status == DownloadStatus.PENDING) job.copy(status = DownloadStatus.PAUSED) else job
+            }
         }
     }
 
@@ -141,9 +151,16 @@ class DownloadHub {
         _jobs.value = _jobs.value.filterNot { it.id == id && it.status != DownloadStatus.RUNNING }
     }
 
+    /**
+     * AUDITORÍA: el update() de antes era read-modify-write sin lock y lo
+     * llamaban el hilo principal (acciones del usuario) y el hilo de IO
+     * (progreso de descarga): dos writers podían pisarse y perder updates.
+     * `MutableStateFlow.update` es atómico (bucle CAS), la carrera es imposible.
+     */
     private fun update(id: String, transform: (DownloadJobUi) -> DownloadJobUi) {
-        val current = _jobs.value
-        val index = current.indexOfFirst { it.id == id }
-        if (index >= 0) _jobs.value = current.toMutableList().also { it[index] = transform(current[index]) }
+        _jobs.update { current ->
+            val index = current.indexOfFirst { it.id == id }
+            if (index >= 0) current.toMutableList().also { it[index] = transform(current[index]) } else current
+        }
     }
 }

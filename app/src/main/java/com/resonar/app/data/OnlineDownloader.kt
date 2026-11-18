@@ -293,7 +293,13 @@ class OnlineDownloader(
                 .take(120)
             val unique = "${track.sourceId}_${track.externalId.take(12)}"
             val fileName = "$safeBase [$unique].$ext"
-            val temp = File(dir, "$fileName.parte")
+            // AUDITORÍA: el .parte incluye la rendición (mime) en su nombre. Sin
+            // esto, un reintento que re-resuelve el stream y recibe OTRA calidad
+            // appendearía con Range bytes de la nueva rendición sobre el .parte
+            // de la anterior → archivo corrupto. Con la rendición en el nombre,
+            // cada calidad retoma su propio .parte y la mezcla es imposible.
+            val rendicion = (handle.mimeType ?: "x").lowercase().replace(Regex("[^a-z0-9]"), "")
+            val temp = File(dir, "$safeBase [$unique-$rendicion].$ext.parte")
 
             // ETAPA 3 (parte 2b): con destino público prendido, el archivo puede
             // YA estar en Music/Resonar de una descarga anterior — por ejemplo
@@ -382,6 +388,16 @@ class OnlineDownloader(
                         }
                     }
                     if (temp.length() < 1024) throw IllegalStateException("Descarga vacía")
+                    // AUDITORÍA: verificar que el archivo sea audio DE VERDAD. Un
+                    // servidor roto o mentiroso puede responder 200 con una página
+                    // HTML; sin este chequeo la guardaríamos como .mp3 y fallaría
+                    // al reproducir (además de ocupar espacio en un disco justo).
+                    // Descartamos lo que SABEMOS que no es audio: la firma no
+                    // coincide con ningún formato que bajamos.
+                    if (!esAudioDeVerdad(temp)) {
+                        temp.delete()
+                        throw IllegalStateException("El servidor no devolvió audio (probablemente una página de error)")
+                    }
                     val size = temp.length()
                     // Destino final (Etapa 3 parte 2b), en orden de preferencia:
                     // 1) Music/Resonar público vía MediaStore (si el usuario lo
@@ -640,6 +656,54 @@ class OnlineDownloader(
         } else {
             null
         }
+    }
+
+    /**
+     * AUDITORÍA: ¿el archivo bajado es audio de verdad? Lee la firma del
+     * arranque (los primeros 16 bytes) y compara con los formatos que la app
+     * guarda: MP3 (ID3 o frame sync), M4A/MP4 (ftyp), FLAC, OGG, WebM, WAV
+     * (RIFF). Un HTML de error ("<html>…") no coincide con ninguno → se
+     * descarta. Regla honesta: no adivinamos QUÉ es, solo descartamos lo que
+     * SEGURAMENTE no es audio.
+     */
+    private fun esAudioDeVerdad(file: File): Boolean {
+        val head = ByteArray(16)
+        file.inputStream().use { input ->
+            var leidos = 0
+            while (leidos < head.size) {
+                val n = input.read(head, leidos, head.size - leidos)
+                if (n < 0) break
+                leidos += n
+            }
+            if (leidos < 4) return false
+        }
+        val texto = String(head, Charsets.ISO_8859_1)
+        return when {
+            texto.startsWith("ID3") -> true // MP3 con etiqueta
+            texto.startsWith("fLaC") -> true // FLAC
+            texto.startsWith("OggS") -> true // OGG
+            texto.startsWith("RIFF") -> true // WAV (y algunos M4A raros empiezan así: c/r/s chequean ftyp abajo)
+            head[4] == 'f'.code.toByte() && head[5] == 't'.code.toByte() &&
+                head[6] == 'y'.code.toByte() && head[7] == 'p'.code.toByte() -> true // MP4/M4A/WebM mov
+            head[0] == 0x1A.toByte() && head[1] == 0x45.toByte() &&
+                head[2] == 0xDF.toByte() && head[3] == 0xA3.toByte() -> true // WebM/Matroska
+            else ->
+                // MP3 sin etiqueta: arranca con frame sync (0xFF Ex) — el HTML
+                // de un error empieza con '<' (0x3C) y no entra por acá.
+                head[0] == 0xFF.toByte() && (head[1].toInt() and 0xE0) == 0xE0
+        }
+    }
+
+    /**
+     * AUDITORIA: los `.parte` de intentos cancelados y nunca reintentados se
+     * acumulan para siempre. Al arrancar el servicio borramos los de más de
+     * 7 días: si en una semana nadie retomó la descarga, ese pedazo ya no
+     * sirve a nadie (la cola privada de la app ya no lo recuerda).
+     */
+    fun limpiarPartesViejas() {
+        val limite = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        dir.listFiles { f -> f.name.endsWith(".parte") && f.lastModified() < limite }
+            ?.forEach { if (it.delete()) Log.i("ResonarDown", "`.parte` viejo borrado: ${it.name}") }
     }
 
     /**

@@ -64,6 +64,9 @@ class DownloadService : Service() {
             idleNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
+        // AUDITORÍA: barato y en IO — tira los `.parte` de más de 7 días que
+        // nadie va a retomar (antes se acumulaban para siempre en la carpeta).
+        scope?.launch(Dispatchers.IO) { runCatching { downloader.limpiarPartesViejas() } }
         if (worker == null || worker?.isActive != true) {
             worker = scope?.launch { processQueue() }
         }
