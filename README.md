@@ -175,17 +175,3 @@ Resonar/
          └─ theme/Theme.kt
 ```
 
-## Decisiones que conviene no romper
-
-- **Nada de "simular" que funciona**: si una fuente falla, la app lo dice.
-- **DI manual** (`AppContainer`): sin Hilt, para no inflar el APK ni la RAM.
-- **SharedPreferences + JSON** en vez de Room: el estado del player no necesita
-  base de datos.
-- **Caché de streaming separada de la descarga automática**: apagar la descarga
-  no tiene que volver lento el streaming.
-- **Carpeta local ≠ nube**: una carpeta elegida en el propio teléfono no se copia
-  ni se cachea; ya está en disco.
-- **Carátulas en tres niveles**: la de la fuente en línea (si la hay), la de la
-  carpeta (`cover.jpg` al lado de los temas) y la de MediaStore (imagen embebida).
-- **Escaneo en una sola pasada por carpeta**: el proveedor de archivos no repone
-  el cursor, así que recorrerlo dos veces perdía archivos.
