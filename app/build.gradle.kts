@@ -19,6 +19,14 @@ val localProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 val jamendoClientId = (localProps.getProperty("jamendo.client_id") ?: "").trim()
+
+// FIRMA DE RELEASE (auditoría): el keystore y su contraseña viven en
+// local.properties (NO versionado). Sin esas líneas, assembleRelease produce
+// un APK sin firmar como antes (no rompe builds de nadie más).
+val releaseStoreFile = (localProps.getProperty("release.store_file") ?: "").trim()
+val releaseStorePassword = localProps.getProperty("release.store_password") ?: ""
+val releaseKeyAlias = (localProps.getProperty("release.key_alias") ?: "").trim()
+val releaseKeyPassword = localProps.getProperty("release.key_password") ?: ""
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -47,6 +55,18 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Firma real si el keystore está configurado (está en local.properties,
+            // fuera del repo). Antes salía sin firmar: no instalable ni distribuible.
+            signingConfig = if (releaseStoreFile.isNotBlank()) {
+                signingConfigs.create("release") {
+                    storeFile = file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                }
+            } else {
+                null
+            }
         }
     }
 
@@ -97,6 +117,11 @@ dependencies {
     // Coil: decodifica al tamaño pedido (96–512 px), no al original. Es CLAVE
     // para la RAM en el Motorola E15.
     implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // ── Tests de unidad (auditoría) ─────────────────────────────────────
+    // Cubren justo los defectos que la auditoría encontró y corrigió.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
     // ── YouTube vía NewPipeExtractor (ETAPA 2B) ────────────────────────
     // Extrae búsqueda y streams de YouTube SIN YouTube API key. Es GPLv3:

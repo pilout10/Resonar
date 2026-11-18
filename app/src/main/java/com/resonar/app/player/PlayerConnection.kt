@@ -186,7 +186,11 @@ class PlayerConnection(
                             playWhenReady = c.playWhenReady,
                             positionMs = c.currentPosition.coerceAtLeast(0L),
                             durationMs = if (c.duration > 0) c.duration else it.durationMs,
-                            ramMb = if (ramTick % 4 == 0) readProcessRamMb() else it.ramMb,
+                    // AUDITORÍA: el RAM de diagnóstico era cada 2 s, con una
+                    // llamada que Android documenta como costosa
+                    // (getProcessMemoryInfo). Cada 30 s alcanza: es un número
+                    // informativo, no algo que cambie en segundos.
+                    ramMb = if (ramTick % 60 == 0) readProcessRamMb() else it.ramMb,
                             batteryExempt = isIgnoringBatteryOptimizations(),
                             notice = when {
                                 bufferingNow && cloudNow -> cloudNotice

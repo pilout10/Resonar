@@ -48,7 +48,7 @@ object Http {
                 if (conn.responseCode !in 200..299) {
                     throw IllegalStateException("HTTP ${conn.responseCode} en $url")
                 }
-                readCapped(conn.inputStream)
+                readResponseCapped(conn.inputStream)
             } finally {
                 conn.disconnect()
             }
@@ -85,4 +85,31 @@ object Http {
      * responden 503 si el cliente dice ser un navegador: piden identificarse.
      */
     suspend fun getStringWithAgent(url: String, userAgent: String): String = getString(url, userAgent)
+}
+
+/** Tope por defecto: 2 MB de metadatos es más que ninguna respuesta real de las fuentes. */
+internal const val MAX_RESPONSE_BYTES = 2_000_000
+
+/**
+ * AUDITORÍA: lee un stream de respuesta CON TOPE de tamaño. Top-level (no
+ * dentro de Http) para que los tests de unidad la prueben sin red: si un
+ * servidor manda más del tope, falla fuerte en vez de llenar la RAM.
+ */
+internal fun readResponseCapped(
+    input: java.io.InputStream,
+    maxBytes: Int = MAX_RESPONSE_BYTES,
+): String {
+    val acumulado = java.io.ByteArrayOutputStream()
+    val trozo = ByteArray(8 * 1024)
+    input.use { stream ->
+        while (true) {
+            val n = stream.read(trozo)
+            if (n < 0) break
+            if (acumulado.size() + n > maxBytes) {
+                throw IllegalStateException("Respuesta demasiado grande (> $maxBytes bytes)")
+            }
+            acumulado.write(trozo, 0, n)
+        }
+    }
+    return acumulado.toString("UTF-8")
 }

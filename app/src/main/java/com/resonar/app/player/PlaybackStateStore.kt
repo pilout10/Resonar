@@ -97,9 +97,14 @@ class PlaybackStateStore(context: Context) {
 
     /**
      * "Seguir sonando cuando otra app pide el audio".
-     * ON por defecto (requisito de la etapa 0).
+     *
+     * AUDITORÍA (Bloque 3): el default era ON. Ahora OFF — es lo que un
+     * usuario espera de cualquier reproductor (pausa cuando otra app pide
+     * el audio). El que lo quiere para jugar con la música de fondo lo
+     * prende una vez en Ajustes y queda guardado. Los que YA lo
+     * prendieron/apagaron no cambian: solo afecta instalaciones nuevas.
      */
-    fun isKeepPlayingEnabled(): Boolean = prefs.getBoolean(KEY_KEEP_PLAYING, true)
+    fun isKeepPlayingEnabled(): Boolean = prefs.getBoolean(KEY_KEEP_PLAYING, false)
 
     fun setKeepPlayingEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_KEEP_PLAYING, enabled).apply()
